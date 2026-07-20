@@ -1,0 +1,96 @@
+name: Inject UUID into Rules Missing rule_id
+
+on:
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - 'rules/*.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  inject-uuid:
+    name: Auto-fill missing rule_id fields
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.ref }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyyaml --quiet
+
+      - name: Inject UUIDs
+        run: |
+          python3 << 'PYEOF'
+          import uuid, re, yaml, glob, sys
+
+          rules = sorted([
+              f for f in glob.glob("rules/*.yml")
+              if ".gitkeep" not in f
+          ])
+
+          injected = []
+
+          for filepath in rules:
+              with open(filepath, "r") as f:
+                  content = f.read()
+
+              rule    = yaml.safe_load(content)
+              rule_id = str(rule.get("rule_id", "")).strip()
+
+              if rule_id and rule_id != "":
+                  print(f"SKIP: {rule.get('name', filepath)} — UUID already present")
+                  continue
+
+              new_uuid = str(uuid.uuid4())
+
+              updated = re.sub(
+                  r'^(rule_id:\s*)"[^"]*"',
+                  f'\\1"{new_uuid}"',
+                  content,
+                  flags=re.MULTILINE
+              )
+
+              if updated == content:
+                  print(f"WARN: rule_id line not found in {filepath}")
+                  continue
+
+              with open(filepath, "w") as f:
+                  f.write(updated)
+
+              print(f"INJECTED: {rule.get('name', filepath)}")
+              print(f"  UUID: {new_uuid}")
+              print(f"  File: {filepath}")
+              injected.append(filepath)
+
+          print(f"\nTotal injected: {len(injected)}")
+          sys.exit(0)
+          PYEOF
+
+      - name: Commit injected UUIDs
+        run: |
+          git config user.name  "elastic-dac-pipeline[bot]"
+          git config user.email "elastic-dac-pipeline[bot]@users.noreply.github.com"
+          git diff --quiet && echo "Nothing to commit" && exit 0
+          git add rules/*.yml
+          FILES=$(git diff --cached --name-only | tr '\n' ' ')
+          git commit -m "chore: auto-inject UUID for $FILES"
+          git push

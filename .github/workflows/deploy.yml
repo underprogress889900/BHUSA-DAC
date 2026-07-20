@@ -1,0 +1,136 @@
+name: Deploy Rules to Elastic
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'rules/*.yml'
+
+jobs:
+  deploy:
+    name: Deploy to Elastic
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Python available
+        run: python3 --version
+
+      - name: Create virtual environment
+        run: python3 -m venv /tmp/bhusa-dac-venv
+
+      - name: Install dependencies
+        run: /tmp/bhusa-dac-venv/bin/pip install pyyaml requests --quiet
+
+      - name: Deploy rules to Elastic
+        env:
+          ELASTIC_URL:     ${{ secrets.ELASTIC_URL }}
+          ELASTIC_API_KEY: ${{ secrets.ELASTIC_API_KEY }}
+        run: |
+          /tmp/bhusa-dac-venv/bin/python3 << 'PYEOF'
+          import yaml, json, glob, os, sys, requests
+
+          ELASTIC_URL = os.environ.get("ELASTIC_URL", "")
+          API_KEY     = os.environ.get("ELASTIC_API_KEY", "")
+
+          if not ELASTIC_URL or not API_KEY:
+              print("ERROR: Missing ELASTIC_URL or ELASTIC_API_KEY")
+              sys.exit(1)
+
+          HEADERS = {
+              "Authorization": f"ApiKey {API_KEY}",
+              "kbn-xsrf":      "true",
+              "Content-Type":  "application/json",
+          }
+
+          # Fields stripped before sending to Elastic API
+          STRIP = ["schema_version", "metadata"]
+
+          rules = sorted([
+              f for f in glob.glob("rules/*.yml")
+              if ".gitkeep" not in f
+          ])
+
+          if not rules:
+              print("No rules found")
+              sys.exit(0)
+
+          print(f"Found {len(rules)} rule(s)\n")
+
+          deployed = failed = 0
+
+          for filepath in rules:
+              rule      = yaml.safe_load(open(filepath))
+              rule_id   = rule.get("rule_id", "")
+              rule_name = rule.get("name", filepath)
+
+              if not rule_id:
+                  print(f"SKIP: {rule_name} — missing rule_id")
+                  continue
+
+              # Build payload — strip DaC internal fields
+              payload = {
+                  k: v for k, v in rule.items()
+                  if k not in STRIP
+              }
+              payload["actions"] = []
+
+              # Check if rule exists
+              check = requests.get(
+                  f"{ELASTIC_URL}/api/detection_engine/rules"
+                  f"?rule_id={rule_id}",
+                  headers=HEADERS,
+              )
+
+              if check.status_code == 200:
+                  resp   = requests.put(
+                      f"{ELASTIC_URL}/api/detection_engine/rules",
+                      headers=HEADERS,
+                      json=payload,
+                  )
+                  action = "UPDATED"
+              else:
+                  resp   = requests.post(
+                      f"{ELASTIC_URL}/api/detection_engine/rules",
+                      headers=HEADERS,
+                      json=payload,
+                  )
+                  action = "CREATED"
+
+              if resp.status_code in [200, 201]:
+                  print(f"{action}: {rule_name}")
+                  deployed += 1
+              else:
+                  print(f"FAILED:  {rule_name}")
+                  print(f"  Status:   {resp.status_code}")
+                  print(f"  Response: {resp.text[:300]}")
+                  failed += 1
+
+          print(f"\nDeployed: {deployed} | Failed: {failed}")
+
+          if failed > 0:
+              sys.exit(1)
+
+          print("All rules deployed successfully")
+          PYEOF
+
+      - name: Clean up
+        if: always()
+        run: rm -rf /tmp/bhusa-dac-venv
+
+      - name: Deployment summary
+        run: |
+          echo "## BHUSA-DAC Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "| Rule | Enabled |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
+          for f in $(find rules -name "*.yml" \
+            ! -name ".gitkeep" | sort); do
+            N=$(grep '^name:' "$f" | head -1 \
+              | sed 's/name: //' | tr -d '"')
+            EN=$(grep '^enabled:' "$f" | head -1 \
+              | awk '{print $2}')
+            echo "| $N | $EN |" >> $GITHUB_STEP_SUMMARY
+          done

@@ -1,0 +1,131 @@
+name: Validate Detection Rules
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    name: Validate Rules
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyyaml jsonschema --quiet
+
+      - name: Check rule_id is not empty
+        run: |
+          python3 << 'PYEOF'
+          import yaml, glob, sys, re
+
+          UUID_PATTERN = (
+              r'^[0-9a-f]{8}-[0-9a-f]{4}-'
+              r'[0-9a-f]{4}-[0-9a-f]{4}-'
+              r'[0-9a-f]{12}$'
+          )
+
+          rules = sorted([
+              f for f in glob.glob("rules/*.yml")
+              if ".gitkeep" not in f
+          ])
+
+          if not rules:
+              print("No rules found — skipping")
+              sys.exit(0)
+
+          failed = 0
+
+          for filepath in rules:
+              try:
+                  rule = yaml.safe_load(open(filepath))
+              except yaml.YAMLError as e:
+                  print(f"FAIL (YAML parse error): {filepath}")
+                  print(f"  {e}")
+                  failed += 1
+                  continue
+
+              name    = rule.get("name", filepath)
+              rule_id = str(rule.get("rule_id", "")).strip()
+
+              if not rule_id or rule_id == "":
+                  print(f"FAIL: {name}")
+                  print(f"  rule_id is empty")
+                  print(f"  uuid-inject.yml did not run or failed")
+                  print(f"  Fix: close PR, push an empty commit to")
+                  print(f"       trigger uuid-inject, then reopen PR")
+                  print(f"  Manual fix: python3 -c \"import uuid; print(uuid.uuid4())\"")
+                  failed += 1
+              elif not re.match(UUID_PATTERN, rule_id):
+                  print(f"FAIL: {name}")
+                  print(f"  rule_id '{rule_id}' is not a valid UUID4")
+                  print(f"  Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
+                  failed += 1
+              else:
+                  print(f"PASS: {name}")
+                  print(f"  rule_id: {rule_id}")
+
+          print(f"\nFailed: {failed}")
+
+          if failed > 0:
+              print()
+              print("=" * 55)
+              print("uuid-inject.yml must run before opening a PR")
+              print("It fires automatically on push to any branch")
+              print("Wait for it to complete then open the PR")
+              print("=" * 55)
+              sys.exit(1)
+
+          sys.exit(0)
+          PYEOF
+
+      - name: Validate rules against schema
+        run: |
+          python3 << 'PYEOF'
+          import yaml, json, jsonschema, glob, sys
+
+          schema = json.load(open("schemas/rule.schema.json"))
+
+          rules = sorted([
+              f for f in glob.glob("rules/*.yml")
+              if ".gitkeep" not in f
+          ])
+
+          if not rules:
+              print("No rules found — skipping")
+              sys.exit(0)
+
+          passed = failed = 0
+
+          for filepath in rules:
+              try:
+                  rule = yaml.safe_load(open(filepath))
+              except yaml.YAMLError as e:
+                  print(f"FAIL (YAML parse error): {filepath}")
+                  print(f"  {e}")
+                  failed += 1
+                  continue
+
+              name = rule.get("name", filepath)
+
+              try:
+                  jsonschema.validate(rule, schema)
+                  print(f"PASS: {name}")
+                  passed += 1
+              except jsonschema.ValidationError as e:
+                  print(f"FAIL: {name}")
+                  print(f"  Field:   {' -> '.join(str(p) for p in e.absolute_path) or 'root'}")
+                  print(f"  Problem: {e.message}")
+                  failed += 1
+
+          print(f"\nPassed: {passed} | Failed: {failed}")
+          sys.exit(1 if failed > 0 else 0)
+          PYEOF

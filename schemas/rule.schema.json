@@ -1,0 +1,199 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DaC Detection Rule Schema v1 — ES|QL Only — Elastic 9.4.3",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "metadata",
+    "rule_id",
+    "name",
+    "description",
+    "author",
+    "enabled",
+    "type",
+    "language",
+    "severity",
+    "risk_score",
+    "tags",
+    "query",
+    "interval",
+    "from",
+    "to",
+    "timestamp_override",
+    "timestamp_override_fallback_disabled",
+    "threat",
+    "note",
+    "false_positives",
+    "references",
+    "max_signals",
+    "actions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["creation_date", "updated_date", "maturity", "author"],
+      "additionalProperties": false,
+      "properties": {
+        "creation_date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}/[0-9]{2}/[0-9]{2}$"
+        },
+        "updated_date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}/[0-9]{2}/[0-9]{2}$"
+        },
+        "maturity": {
+          "type": "string",
+          "enum": ["production", "development", "deprecated"]
+        },
+        "author": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "rule_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 5
+    },
+    "description": {
+      "type": "string",
+      "minLength": 10
+    },
+    "author": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "type": {
+      "type": "string",
+      "const": "esql"
+    },
+    "language": {
+      "type": "string",
+      "const": "esql"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "risk_score": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "tags": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "query": {
+      "type": "string",
+      "minLength": 10
+    },
+    "interval": {
+      "type": "string",
+      "pattern": "^[0-9]+(m|h)$"
+    },
+    "from": {
+      "type": "string",
+      "pattern": "^now-[0-9]+(s|m|h)$"
+    },
+    "to": {
+      "type": "string",
+      "const": "now"
+    },
+    "timestamp_override": {
+      "type": "string",
+      "const": "event.ingested"
+    },
+    "timestamp_override_fallback_disabled": {
+      "type": "boolean",
+      "const": false
+    },
+    "threat": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["framework", "tactic", "technique"],
+        "additionalProperties": false,
+        "properties": {
+          "framework": {
+            "type": "string",
+            "const": "MITRE ATT&CK"
+          },
+          "tactic": {
+            "type": "object",
+            "required": ["id", "name", "reference"],
+            "additionalProperties": false,
+            "properties": {
+              "id":        { "type": "string", "minLength": 1 },
+              "name":      { "type": "string", "minLength": 1 },
+              "reference": { "type": "string", "minLength": 1 }
+            }
+          },
+          "technique": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "reference", "subtechnique"],
+              "additionalProperties": false,
+              "properties": {
+                "id":        { "type": "string", "minLength": 1 },
+                "name":      { "type": "string", "minLength": 1 },
+                "reference": { "type": "string", "minLength": 1 },
+                "subtechnique": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "name", "reference"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "id":        { "type": "string", "minLength": 1 },
+                      "name":      { "type": "string", "minLength": 1 },
+                      "reference": { "type": "string", "minLength": 1 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "note": {
+      "type": "string",
+      "minLength": 10
+    },
+    "false_positives": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "references": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "max_signals": {
+      "type": "integer",
+      "const": 100
+    },
+    "actions": {
+      "type": "array",
+      "maxItems": 0
+    }
+  }
+}

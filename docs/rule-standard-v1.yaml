@@ -1,0 +1,101 @@
+# DaC Rule Standard v1 | Elastic 9.4.3 | ES|QL Only
+# Copy: cp docs/rule-standard-v1.yaml rules/<rule-name>.yml
+# UUID: python3 -c "import uuid; print(uuid.uuid4())"
+
+schema_version: 1
+
+metadata:
+  creation_date: ""      # YYYY/MM/DD
+  updated_date:  ""      # YYYY/MM/DD
+  maturity: "production" # production | development | deprecated
+  author:
+    - "AUTHOR NAME"
+
+rule_id: ""              # UUID4 — fill manually or via pipeline
+
+name: ""
+# Convention: SOC-UC-{NNN}-{OS/Datasource}-{Short Description}
+
+description: |
+  <What this rule detects and the exact behavior.>
+  <Why it matters: attacker context and MITRE technique.>
+  <Scope or environment note.>
+
+author:
+  - "AUTHOR NAME"
+
+enabled: true            # true → deployed ENABLED | false → deployed DISABLED
+type: esql
+language: esql
+
+severity: ""             # low | medium | high | critical
+risk_score: 0            # low=21 | medium=47 | high=73 | critical=99
+
+tags:
+  - ""                   # Domain: Endpoint | OS: Linux | Use Case: Threat Detection
+                         # Tactic: <name> | T<ID> | Data Source: Elastic Defend
+
+query: |
+  FROM logs-endpoint.events.*
+  | WHERE event.action == "exec"
+    AND process.name == "REPLACE_ME"
+  | KEEP @timestamp, host.name, user.name,
+         process.name, process.command_line,
+         event.dataset
+  | RENAME event.dataset AS logSource
+
+interval: "5m"           # 5m | 10m | 15m | 30m | 1h | 4h | 6h | 24h
+from: "now-10m"          # now-(interval_minutes + 5)m
+                         # 5m→now-10m | 1h→now-65m | 4h→now-245m | 24h→now-1445m
+to: "now"
+
+timestamp_override: "event.ingested"
+timestamp_override_fallback_disabled: false
+
+threat:
+  - framework: "MITRE ATT&CK"
+    tactic:
+      id: ""
+      name: ""
+      reference: ""
+    technique:
+      - id: ""
+        name: ""
+        reference: ""
+        subtechnique: []
+
+note: |
+  ## Triage and Analysis
+
+  ### What triggered this alert
+  One sentence: exactly what event occurred and on which platform.
+
+  ### Possible investigation steps
+  - Examine process name, arguments, parent process, and user context
+  - Check for preceding or correlated commands from the same process tree
+  - Review network activity from the same process for outbound connections
+  - Validate the session: who logged in, from where, and how
+  - Hunt for related persistence or staging artifacts on the same host
+
+  ### False positive analysis
+  - Known benign scenario 1
+  - Known benign scenario 2
+
+  ### Response and remediation
+  - Contain: isolate host or kill process tree if confirmed malicious
+  - Collect: preserve process tree, artifacts, and relevant log windows
+  - Eradicate: remove persistence entries and clean staged files
+  - Recover: rotate credentials and restore clean state
+  - Escalate immediately if exfiltration or lateral movement evidence found
+
+  ### References
+  - https://attack.mitre.org/techniques/TXXXX/
+
+false_positives:
+  - ""
+
+references:
+  - ""
+
+max_signals: 100
+actions: []
