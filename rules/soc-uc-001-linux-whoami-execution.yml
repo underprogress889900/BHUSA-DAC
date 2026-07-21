@@ -7,7 +7,7 @@ metadata:
   author:
     - "HRISHIKESH YALAVARTHI"
 
-rule_id: ""
+rule_id: "fdf91c98-1d7d-497d-b6fd-f1dcaaef87ac"
 
 name: "SOC-UC-001-Linux-Whoami Execution Detected"
 
