@@ -10,28 +10,27 @@ on:
 jobs:
   deploy:
     name: Deploy to Elastic
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify Python available
-        run: python3 --version
-
-      - name: Create virtual environment
-        run: python3 -m venv /tmp/bhusa-dac-venv
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Install dependencies
-        run: /tmp/bhusa-dac-venv/bin/pip install pyyaml requests --quiet
+        run: pip install pyyaml requests --quiet
 
       - name: Deploy rules to Elastic
         env:
           ELASTIC_URL:     ${{ secrets.ELASTIC_URL }}
           ELASTIC_API_KEY: ${{ secrets.ELASTIC_API_KEY }}
         run: |
-          /tmp/bhusa-dac-venv/bin/python3 << 'PYEOF'
-          import yaml, json, glob, os, sys, requests
+          python3 << 'PYEOF'
+          import yaml, glob, os, sys, requests
 
           ELASTIC_URL = os.environ.get("ELASTIC_URL", "")
           API_KEY     = os.environ.get("ELASTIC_API_KEY", "")
@@ -46,7 +45,6 @@ jobs:
               "Content-Type":  "application/json",
           }
 
-          # Fields stripped before sending to Elastic API
           STRIP = ["schema_version", "metadata"]
 
           rules = sorted([
@@ -58,7 +56,8 @@ jobs:
               print("No rules found")
               sys.exit(0)
 
-          print(f"Found {len(rules)} rule(s)\n")
+          print(f"Target: {ELASTIC_URL}")
+          print(f"Found:  {len(rules)} rule(s)\n")
 
           deployed = failed = 0
 
@@ -71,14 +70,12 @@ jobs:
                   print(f"SKIP: {rule_name} — missing rule_id")
                   continue
 
-              # Build payload — strip DaC internal fields
               payload = {
                   k: v for k, v in rule.items()
                   if k not in STRIP
               }
               payload["actions"] = []
 
-              # Check if rule exists
               check = requests.get(
                   f"{ELASTIC_URL}/api/detection_engine/rules"
                   f"?rule_id={rule_id}",
@@ -117,13 +114,11 @@ jobs:
           print("All rules deployed successfully")
           PYEOF
 
-      - name: Clean up
-        if: always()
-        run: rm -rf /tmp/bhusa-dac-venv
-
       - name: Deployment summary
         run: |
           echo "## BHUSA-DAC Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** ${{ secrets.ELASTIC_URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Rule | Enabled |" >> $GITHUB_STEP_SUMMARY
           echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
           for f in $(find rules -name "*.yml" \
