@@ -39,7 +39,7 @@ tags:
 query: |
   FROM logs-endpoint.events.*
   | WHERE event.action == "exec"
-    AND process.name == "whoami"
+    AND process.name == "ls"
   | KEEP @timestamp, host.name, user.name,
          process.name, process.command_line,
          event.dataset
