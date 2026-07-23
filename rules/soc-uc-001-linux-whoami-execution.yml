@@ -34,6 +34,7 @@ tags:
   - "Use Case: Threat Detection"
   - "Tactic: Discovery"
   - "T1033"
+  - "T1022"
   - "Data Source: Elastic Defend"
 
 query: |
