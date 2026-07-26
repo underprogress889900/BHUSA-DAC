@@ -7,6 +7,8 @@ on:
 
 jobs:
   validate:
+    # NOTE: this job name is the required status check context in the
+    # `main-protection` ruleset. Renaming it silently disables the merge gate.
     name: Validate Rules
     runs-on: ubuntu-latest
 
@@ -20,9 +22,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install pyyaml jsonschema --quiet
+        run: pip install pyyaml jsonschema requests --quiet
 
-      - name: Check rule_id is not empty
+      - name: Check rule_id is present and well-formed
         run: |
           python3 << 'PYEOF'
           import yaml, glob, sys, re
@@ -42,7 +44,7 @@ jobs:
               print("No rules found — skipping")
               sys.exit(0)
 
-          failed = 0
+          failed = []
 
           for filepath in rules:
               try:
@@ -50,44 +52,34 @@ jobs:
               except yaml.YAMLError as e:
                   print(f"FAIL (YAML parse error): {filepath}")
                   print(f"  {e}")
-                  failed += 1
+                  failed.append(f"{filepath}: YAML parse error: {e}")
                   continue
 
               name    = rule.get("name", filepath)
               rule_id = str(rule.get("rule_id", "")).strip()
 
-              if not rule_id or rule_id == "":
+              if not rule_id:
                   print(f"FAIL: {name}")
                   print(f"  rule_id is empty")
-                  print(f"  uuid-inject.yml did not run or failed")
-                  print(f"  Fix: close PR, push an empty commit to")
-                  print(f"       trigger uuid-inject, then reopen PR")
-                  print(f"  Manual fix: python3 -c \"import uuid; print(uuid.uuid4())\"")
-                  failed += 1
+                  print(f"  rule_id is minted by the DAC Agent at submission time.")
+                  print(f"  If you hand-wrote this file, generate one:")
+                  print(f'    python3 -c "import uuid; print(uuid.uuid4())"')
+                  failed.append(f"{name}: rule_id is empty")
               elif not re.match(UUID_PATTERN, rule_id):
                   print(f"FAIL: {name}")
                   print(f"  rule_id '{rule_id}' is not a valid UUID4")
-                  print(f"  Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
-                  failed += 1
+                  failed.append(f"{name}: rule_id '{rule_id}' is not a valid UUID4")
               else:
-                  print(f"PASS: {name}")
-                  print(f"  rule_id: {rule_id}")
+                  print(f"PASS: {name}  ({rule_id})")
 
-          print(f"\nFailed: {failed}")
-
-          if failed > 0:
-              print()
-              print("=" * 55)
-              print("uuid-inject.yml must run before opening a PR")
-              print("It fires automatically on push to any branch")
-              print("Wait for it to complete then open the PR")
-              print("=" * 55)
+          if failed:
+              with open("validation_errors.txt", "a") as fh:
+                  fh.write("## rule_id\n" + "\n".join(f"- {e}" for e in failed) + "\n\n")
               sys.exit(1)
-
-          sys.exit(0)
           PYEOF
 
       - name: Validate rules against schema
+        if: always()
         run: |
           python3 << 'PYEOF'
           import yaml, json, jsonschema, glob, sys
@@ -103,15 +95,14 @@ jobs:
               print("No rules found — skipping")
               sys.exit(0)
 
-          passed = failed = 0
+          passed, failed = 0, []
 
           for filepath in rules:
               try:
                   rule = yaml.safe_load(open(filepath))
               except yaml.YAMLError as e:
-                  print(f"FAIL (YAML parse error): {filepath}")
-                  print(f"  {e}")
-                  failed += 1
+                  failed.append(f"{filepath}: YAML parse error: {e}")
+                  print(f"FAIL (YAML parse error): {filepath}\n  {e}")
                   continue
 
               name = rule.get("name", filepath)
@@ -121,11 +112,234 @@ jobs:
                   print(f"PASS: {name}")
                   passed += 1
               except jsonschema.ValidationError as e:
+                  field = ' -> '.join(str(p) for p in e.absolute_path) or 'root'
                   print(f"FAIL: {name}")
-                  print(f"  Field:   {' -> '.join(str(p) for p in e.absolute_path) or 'root'}")
+                  print(f"  Field:   {field}")
                   print(f"  Problem: {e.message}")
-                  failed += 1
+                  failed.append(f"{name}: field `{field}`: {e.message}")
+                  open("failed_files.txt", "a").write(filepath + "\n")
 
-          print(f"\nPassed: {passed} | Failed: {failed}")
-          sys.exit(1 if failed > 0 else 0)
+          print(f"\nPassed: {passed} | Failed: {len(failed)}")
+
+          if failed:
+              with open("validation_errors.txt", "a") as fh:
+                  fh.write("## schema\n" + "\n".join(f"- {e}" for e in failed) + "\n\n")
+              sys.exit(1)
+          PYEOF
+
+      # ── ES|QL conventions ────────────────────────────────────────────────
+      # A non-aggregating ES|QL rule without METADATA _id,_index,_version cannot
+      # de-duplicate alerts or link them back to the source document. SOC-UC-001
+      # shipped without it, which is why this check exists.
+      - name: Lint ES|QL conventions
+        if: always()
+        run: |
+          python3 << 'PYEOF'
+          import yaml, glob, re, sys
+
+          rules = sorted([f for f in glob.glob("rules/*.yml") if ".gitkeep" not in f])
+          if not rules:
+              sys.exit(0)
+
+          failed = []
+
+          for filepath in rules:
+              try:
+                  rule = yaml.safe_load(open(filepath))
+              except yaml.YAMLError:
+                  continue                      # already reported by an earlier step
+
+              name  = rule.get("name", filepath)
+              query = str(rule.get("query", "") or "")
+
+              if not query.strip():
+                  continue
+
+              if re.search(r"\|\s*STATS\b", query, re.I):
+                  print(f"SKIP: {name} — aggregating query, METADATA not required")
+                  continue
+
+              problems = []
+              if not re.search(r"METADATA\s+_id\s*,\s*_index\s*,\s*_version", query, re.I):
+                  problems.append(
+                      'FROM clause is missing "METADATA _id, _index, _version" — '
+                      "without it Elastic cannot de-duplicate alerts or link them "
+                      "to source documents"
+                  )
+              keep = re.search(r"\|\s*KEEP\b([^|]*)", query, re.I)
+              keep_fields = keep.group(1) if keep else ""
+              for f in ("_id", "_index", "_version"):
+                  if f not in keep_fields:
+                      problems.append(f"KEEP is missing {f}")
+
+              if problems:
+                  print(f"FAIL: {name}")
+                  for p in problems:
+                      print(f"  {p}")
+                  failed.extend(f"{name}: {p}" for p in problems)
+                  open("failed_files.txt", "a").write(filepath + "\n")
+              else:
+                  print(f"PASS: {name}")
+
+          if failed:
+              with open("validation_errors.txt", "a") as fh:
+                  fh.write("## esql conventions\n" + "\n".join(f"- {e}" for e in failed) + "\n\n")
+              sys.exit(1)
+          PYEOF
+
+      # ── ES|QL runtime execution ──────────────────────────────────────────
+      # Deliberately uses ELASTIC_API_KEY — the same identity that will own the
+      # deployed rule. A rule created by a key that cannot read its own index
+      # deploys "successfully" and then sits in partial failure forever, which is
+      # exactly what happened to SOC-UC-001. Validating with any other key would
+      # pass and tell us nothing.
+      - name: Execute ES|QL against Elastic
+        if: always()
+        env:
+          ELASTICSEARCH_URL: ${{ secrets.ELASTICSEARCH_URL }}
+          ELASTIC_API_KEY:   ${{ secrets.ELASTIC_API_KEY }}
+        run: |
+          python3 << 'PYEOF'
+          import yaml, glob, os, sys, json, requests
+
+          ES  = (os.environ.get("ELASTICSEARCH_URL") or "").rstrip("/")
+          KEY = os.environ.get("ELASTIC_API_KEY") or ""
+
+          if not ES or not KEY:
+              print("ERROR: ELASTICSEARCH_URL or ELASTIC_API_KEY is not set.")
+              print("The runtime ES|QL check cannot run without both.")
+              with open("validation_errors.txt", "a") as fh:
+                  fh.write("## esql runtime\n- ELASTICSEARCH_URL / ELASTIC_API_KEY not configured\n\n")
+              sys.exit(1)
+
+          rules = sorted([f for f in glob.glob("rules/*.yml") if ".gitkeep" not in f])
+          if not rules:
+              sys.exit(0)
+
+          headers = {"Authorization": f"ApiKey {KEY}", "Content-Type": "application/json"}
+          failed = []
+
+          for filepath in rules:
+              try:
+                  rule = yaml.safe_load(open(filepath))
+              except yaml.YAMLError:
+                  continue
+
+              name  = rule.get("name", filepath)
+              query = str(rule.get("query", "") or "").strip()
+              if not query:
+                  continue
+
+              # LIMIT 0 parses, resolves every field, and returns no rows (~1 ms).
+              probe = query + "\n| LIMIT 0"
+
+              try:
+                  r = requests.post(f"{ES}/_query?format=json", headers=headers,
+                                    json={"query": probe}, timeout=30)
+              except Exception as e:
+                  print(f"FAIL: {name}\n  request error: {e}")
+                  failed.append(f"{name}: request error: {e}")
+                  open("failed_files.txt", "a").write(filepath + "\n")
+                  continue
+
+              if r.status_code != 200:
+                  try:
+                      rc = r.json()["error"]["root_cause"][0]
+                      reason = rc.get("reason", "")
+                  except Exception:
+                      reason = r.text[:400]
+                  print(f"FAIL: {name}")
+                  print(f"  HTTP {r.status_code}: {reason}")
+                  failed.append(f"{name}: {reason}")
+                  open("failed_files.txt", "a").write(filepath + "\n")
+                  continue
+
+              cols = r.json().get("columns", [])
+
+              # A pattern matching no indices returns 200 with a single
+              # "<no-fields>" column. The rule would deploy clean and never fire.
+              if len(cols) == 1 and cols[0].get("name") == "<no-fields>":
+                  msg = ("index pattern matches no indices — the query parses but "
+                         "targets nothing, so the rule would deploy and never fire. "
+                         "Check the FROM clause, and check that ELASTIC_API_KEY can "
+                         "read that index.")
+                  print(f"FAIL: {name}\n  {msg}")
+                  failed.append(f"{name}: {msg}")
+                  open("failed_files.txt", "a").write(filepath + "\n")
+                  continue
+
+              print(f"PASS: {name} — {len(cols)} columns resolved")
+
+          if failed:
+              with open("validation_errors.txt", "a") as fh:
+                  fh.write("## esql runtime\n" + "\n".join(f"- {e}" for e in failed) + "\n\n")
+              sys.exit(1)
+          PYEOF
+
+      - name: Validation summary
+        if: always()
+        run: |
+          {
+            echo "## Rule validation"
+            if [ -s validation_errors.txt ]; then
+              echo ""
+              echo "**Failed.**"
+              echo ""
+              cat validation_errors.txt
+            else
+              echo ""
+              echo "All checks passed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ── feed failures back to the DAC Agent ──────────────────────────────
+      # The agent pushes a fix commit to the same branch and CI re-runs. n8n caps
+      # this at 3 attempts; without a cap it would loop indefinitely.
+      - name: Report failure to n8n
+        if: failure()
+        env:
+          N8N_URL: ${{ secrets.N8N_DAC_WEBHOOK_URL }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.head_ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os, urllib.request, sys
+
+          url = os.environ.get("N8N_URL") or ""
+          if not url:
+              print("N8N_DAC_WEBHOOK_URL not set — skipping feedback to n8n")
+              sys.exit(0)
+
+          try:
+              errors = open("validation_errors.txt").read().strip()
+          except FileNotFoundError:
+              errors = "Validation failed but produced no structured errors. See the run log."
+
+          # The agent needs concrete files to correct. If we cannot name one it
+          # reports to Slack instead of guessing.
+          try:
+              files = sorted({l.strip() for l in open("failed_files.txt") if l.strip()})
+          except FileNotFoundError:
+              files = []
+
+          payload = {
+              "pr_number": os.environ.get("PR_NUMBER", ""),
+              "branch":    os.environ.get("HEAD_REF", ""),
+              "run_url":   os.environ.get("RUN_URL", ""),
+              "errors":    errors,
+              "files":     files,
+          }
+          print("reporting failing files:", files or "(none identified)")
+
+          req = urllib.request.Request(
+              url, method="POST",
+              headers={"Content-Type": "application/json"},
+              data=json.dumps(payload).encode())
+          try:
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  print(f"Reported to n8n: HTTP {r.status}")
+          except Exception as e:
+              # Never mask the real validation failure behind a delivery failure.
+              print(f"Could not reach n8n ({e}) — validation failure still stands.")
           PYEOF

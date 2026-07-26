@@ -7,6 +7,12 @@ on:
     paths:
       - 'rules/*.yml'
 
+# Two PRs merging close together would otherwise run two deploys against the same
+# Elastic deployment at once, racing on the same rule IDs.
+concurrency:
+  group: deploy-elastic
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy to Elastic
@@ -30,9 +36,9 @@ jobs:
           ELASTIC_API_KEY: ${{ secrets.ELASTIC_API_KEY }}
         run: |
           python3 << 'PYEOF'
-          import yaml, glob, os, sys, requests
+          import yaml, glob, os, sys, json, requests
 
-          ELASTIC_URL = os.environ.get("ELASTIC_URL", "")
+          ELASTIC_URL = os.environ.get("ELASTIC_URL", "").rstrip("/")
           API_KEY     = os.environ.get("ELASTIC_API_KEY", "")
 
           if not ELASTIC_URL or not API_KEY:
@@ -47,6 +53,51 @@ jobs:
 
           STRIP = ["schema_version", "metadata"]
 
+          # ── the n8n notification action ───────────────────────────────────
+          # Every deployed rule gets this. Without it an alert only reaches the SOC
+          # flow via OpenCTI's Elastic connector, which polls every 30 minutes;
+          # with it, Elastic POSTs straight to the SOC Triage Agent in seconds.
+          #
+          # The connector id and this body are copied verbatim from the working
+          # hand-built rule 159c90bb (macOS User Account Creation) rather than
+          # invented. `notifyWhen` is camelCase here — that is what the detection
+          # engine rules API expects, unlike the alerting API's notify_when.
+          #
+          # Defined once here rather than in each rule's YAML: no drift between
+          # rules, and retargeting the webhook is a one-line change.
+          WEBHOOK_CONNECTOR_ID = "n8n-alert-triage"
+
+          ACTION_BODY = {
+              "alert_id":             "{{alert.id}}",
+              "rule_name":            "{{rule.name}}",
+              "rule_id":              "{{rule.id}}",
+              "severity":             "{{context.rule.severity}}",
+              "risk_score":           "{{context.rule.risk_score}}",
+              "rule_description":     "{{context.rule.description}}",
+              "host_name":            "{{context.alerts.0.host.name}}",
+              "user_name":            "{{context.alerts.0.user.name}}",
+              "source_ip":            "{{context.alerts.0.source.ip}}",
+              "destination_ip":       "{{context.alerts.0.destination.ip}}",
+              "process_name":         "{{context.alerts.0.process.name}}",
+              "process_command_line": "{{context.alerts.0.process.command_line}}",
+              "file_hash":            "{{context.alerts.0.file.hash.sha256}}",
+              "domain":               "{{context.alerts.0.dns.question.name}}",
+              "alert_timestamp":      "{{date}}",
+              "rule_query":           "{{context.rule.query}}",
+              "rule_language":        "{{context.rule.language}}",
+          }
+
+          def n8n_action():
+              return {
+                  "id":             WEBHOOK_CONNECTOR_ID,
+                  "action_type_id": ".webhook",
+                  "group":          "default",
+                  "params":         {"body": json.dumps(ACTION_BODY, indent=2)},
+                  "frequency":      {"summary": False,
+                                     "notifyWhen": "onActiveAlert",
+                                     "throttle": None},
+              }
+
           rules = sorted([
               f for f in glob.glob("rules/*.yml")
               if ".gitkeep" not in f
@@ -59,7 +110,7 @@ jobs:
           print(f"Target: {ELASTIC_URL}")
           print(f"Found:  {len(rules)} rule(s)\n")
 
-          deployed = failed = 0
+          deployed, failed, deployed_ids = 0, 0, []
 
           for filepath in rules:
               rule      = yaml.safe_load(open(filepath))
@@ -70,11 +121,8 @@ jobs:
                   print(f"SKIP: {rule_name} — missing rule_id")
                   continue
 
-              payload = {
-                  k: v for k, v in rule.items()
-                  if k not in STRIP
-              }
-              payload["actions"] = []
+              payload = {k: v for k, v in rule.items() if k not in STRIP}
+              payload["actions"] = [n8n_action()]
 
               check = requests.get(
                   f"{ELASTIC_URL}/api/detection_engine/rules"
@@ -100,10 +148,30 @@ jobs:
               if resp.status_code in [200, 201]:
                   print(f"{action}: {rule_name}")
                   deployed += 1
+                  deployed_ids.append((rule_id, rule_name))
               else:
                   print(f"FAILED:  {rule_name}")
                   print(f"  Status:   {resp.status_code}")
                   print(f"  Response: {resp.text[:300]}")
+                  failed += 1
+
+          # ── verify the action actually attached ───────────────────────────
+          # A rule that deploys without its webhook action is invisible to the SOC
+          # flow, and nothing else would surface that.
+          print("\nVerifying notification actions...")
+          for rule_id, rule_name in deployed_ids:
+              v = requests.get(
+                  f"{ELASTIC_URL}/api/detection_engine/rules?rule_id={rule_id}",
+                  headers=HEADERS,
+              )
+              if v.status_code != 200:
+                  print(f"  WARN: {rule_name} — could not re-read (HTTP {v.status_code})")
+                  continue
+              acts = v.json().get("actions") or []
+              if len(acts) == 1 and acts[0].get("id") == WEBHOOK_CONNECTOR_ID:
+                  print(f"  OK:   {rule_name} — n8n webhook action attached")
+              else:
+                  print(f"  FAIL: {rule_name} — expected 1 n8n action, found {len(acts)}")
                   failed += 1
 
           print(f"\nDeployed: {deployed} | Failed: {failed}")
@@ -115,17 +183,24 @@ jobs:
           PYEOF
 
       - name: Deployment summary
+        if: always()
         run: |
-          echo "## BHUSA-DAC Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "**Target:** ${{ secrets.ELASTIC_URL }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Rule | Enabled |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
-          for f in $(find rules -name "*.yml" \
-            ! -name ".gitkeep" | sort); do
-            N=$(grep '^name:' "$f" | head -1 \
-              | sed 's/name: //' | tr -d '"')
-            EN=$(grep '^enabled:' "$f" | head -1 \
-              | awk '{print $2}')
-            echo "| $N | $EN |" >> $GITHUB_STEP_SUMMARY
-          done
+          {
+            echo "## BHUSA-DAC Deployment"
+            echo ""
+            echo "Every deployed rule is given the \`n8n-alert-triage\` webhook action,"
+            echo "so alerts reach the SOC Triage Agent directly."
+            echo ""
+            echo "| Rule | Enabled | Severity |"
+            echo "|------|---------|----------|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          python3 - << 'PYEOF' >> "$GITHUB_STEP_SUMMARY"
+          import yaml, glob
+          for f in sorted(x for x in glob.glob("rules/*.yml") if ".gitkeep" not in x):
+              try:
+                  r = yaml.safe_load(open(f)) or {}
+              except Exception:
+                  print(f"| {f} | parse error | - |")
+                  continue
+              print(f"| {r.get('name', f)} | {r.get('enabled')} | {r.get('severity', '-')} |")
+          PYEOF

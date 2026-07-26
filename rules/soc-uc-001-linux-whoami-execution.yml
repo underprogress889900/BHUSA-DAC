@@ -7,7 +7,7 @@ metadata:
   author:
     - "HRISHIKESH YALAVARTHI"
 
-rule_id: "cc0709c9-105b-4fe5-9408-9851254e750f"
+rule_id: "fdf91c98-1d7d-497d-b6fd-f1dcaaef87ac"
 
 name: "SOC-UC-001-Linux-Whoami Execution Detected"
 
@@ -38,10 +38,11 @@ tags:
   - "Data Source: Elastic Defend"
 
 query: |
-  FROM logs-endpoint.events.*
+  FROM logs-endpoint.events.process-default METADATA _id, _index, _version
   | WHERE event.action == "exec"
     AND process.name == "whoami && id"
-  | KEEP @timestamp, host.name, user.name,
+  | KEEP _id, _index, _version,
+         @timestamp, host.name, user.name,
          process.name, process.command_line,
          event.dataset
   | RENAME event.dataset AS logSource

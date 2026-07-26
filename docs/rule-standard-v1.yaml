@@ -1,6 +1,7 @@
 # DaC Rule Standard v1 | Elastic 9.4.3 | ES|QL Only
 # Copy: cp docs/rule-standard-v1.yaml rules/<rule-name>.yml
-# UUID: python3 -c "import uuid; print(uuid.uuid4())"
+# UUID: leave rule_id empty — the DAC Agent mints it on submission.
+#       Hand-writing a file instead? python3 -c "import uuid; print(uuid.uuid4())"
 
 schema_version: 1
 
@@ -11,7 +12,7 @@ metadata:
   author:
     - "AUTHOR NAME"
 
-rule_id: ""              # UUID4 — fill manually or via pipeline
+rule_id: ""              # UUID4 — minted by the DAC Agent; leave empty
 
 name: ""
 # Convention: SOC-UC-{NNN}-{OS/Datasource}-{Short Description}
@@ -35,11 +36,19 @@ tags:
   - ""                   # Domain: Endpoint | OS: Linux | Use Case: Threat Detection
                          # Tactic: <name> | T<ID> | Data Source: Elastic Defend
 
+# METADATA _id, _index, _version is REQUIRED for any non-aggregating rule (no
+# STATS). Without it Elastic cannot de-duplicate alerts or link them back to the
+# source document, and the rule will be rejected by CI.
+# Target a concrete data stream — a wildcard that matches nothing still returns
+# HTTP 200, so the rule would deploy successfully and never fire.
+#   logs-endpoint.events.process-default   logs-endpoint.events.file-default
+#   logs-endpoint.events.network-default   logs-endpoint.events.security-default
 query: |
-  FROM logs-endpoint.events.*
+  FROM logs-endpoint.events.process-default METADATA _id, _index, _version
   | WHERE event.action == "exec"
     AND process.name == "REPLACE_ME"
-  | KEEP @timestamp, host.name, user.name,
+  | KEEP _id, _index, _version,
+         @timestamp, host.name, user.name,
          process.name, process.command_line,
          event.dataset
   | RENAME event.dataset AS logSource
@@ -98,4 +107,7 @@ references:
   - ""
 
 max_signals: 100
+
+# Leave this empty. deploy.yml attaches the `n8n-alert-triage` webhook action to
+# every rule at deploy time, so alerts reach the SOC Triage Agent directly.
 actions: []
