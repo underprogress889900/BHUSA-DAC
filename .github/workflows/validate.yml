@@ -117,6 +117,7 @@ jobs:
                   print(f"  Field:   {field}")
                   print(f"  Problem: {e.message}")
                   failed.append(f"{name}: field `{field}`: {e.message}")
+                  open("failed_files.txt", "a").write(filepath + "\n")
 
           print(f"\nPassed: {passed} | Failed: {len(failed)}")
 
@@ -176,6 +177,7 @@ jobs:
                   for p in problems:
                       print(f"  {p}")
                   failed.extend(f"{name}: {p}" for p in problems)
+                  open("failed_files.txt", "a").write(filepath + "\n")
               else:
                   print(f"PASS: {name}")
 
@@ -237,6 +239,7 @@ jobs:
               except Exception as e:
                   print(f"FAIL: {name}\n  request error: {e}")
                   failed.append(f"{name}: request error: {e}")
+                  open("failed_files.txt", "a").write(filepath + "\n")
                   continue
 
               if r.status_code != 200:
@@ -248,6 +251,7 @@ jobs:
                   print(f"FAIL: {name}")
                   print(f"  HTTP {r.status_code}: {reason}")
                   failed.append(f"{name}: {reason}")
+                  open("failed_files.txt", "a").write(filepath + "\n")
                   continue
 
               cols = r.json().get("columns", [])
@@ -261,6 +265,7 @@ jobs:
                          "read that index.")
                   print(f"FAIL: {name}\n  {msg}")
                   failed.append(f"{name}: {msg}")
+                  open("failed_files.txt", "a").write(filepath + "\n")
                   continue
 
               print(f"PASS: {name} — {len(cols)} columns resolved")
@@ -311,12 +316,21 @@ jobs:
           except FileNotFoundError:
               errors = "Validation failed but produced no structured errors. See the run log."
 
+          # The agent needs concrete files to correct. If we cannot name one it
+          # reports to Slack instead of guessing.
+          try:
+              files = sorted({l.strip() for l in open("failed_files.txt") if l.strip()})
+          except FileNotFoundError:
+              files = []
+
           payload = {
               "pr_number": os.environ.get("PR_NUMBER", ""),
               "branch":    os.environ.get("HEAD_REF", ""),
               "run_url":   os.environ.get("RUN_URL", ""),
               "errors":    errors,
+              "files":     files,
           }
+          print("reporting failing files:", files or "(none identified)")
 
           req = urllib.request.Request(
               url, method="POST",
