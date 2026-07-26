@@ -1,0 +1,90 @@
+schema_version: 1
+
+metadata:
+  creation_date: "2026/07/26"
+  updated_date:  "2026/07/26"
+  maturity: "production"
+  author:
+    - "DAC Agent (n8n)"
+
+rule_id: "e31f37cd-a211-45b0-a7ba-33ef406ae2ce"
+
+name: "SOC-UC-001-Linux-Whoami Execution Detected"
+
+description: |
+  Detects the execution of the 'whoami' command on Linux systems, which can be used by attackers for privilege escalation or reconnaissance.
+
+author:
+  - "DAC Agent (n8n)"
+
+enabled: true
+type: esql
+language: esql
+
+severity: "low"
+risk_score: 21
+
+tags:
+  - "Domain: Endpoint"
+  - "OS: Linux"
+  - "Use Case: Threat Detection"
+  - "Tactic: Privilege Escalation"
+  - "Tactic: Discovery"
+  - "T1033"
+  - "T1087"
+  - "Data Source: Elastic Defend"
+
+query: |
+  FROM logs-endpoint.events.process-default METADATA _id, _index, _version
+  | WHERE event.type == "start" and process.name == "whoami"
+  | KEEP _id, _index, _version, @timestamp, host.name, user.name, process.pid, process.name, process.args, process.executable, process.parent.executable, process.parent.name
+
+interval: "5m"
+from: "now-10m"
+to: "now"
+
+timestamp_override: "event.ingested"
+timestamp_override_fallback_disabled: false
+
+threat:
+  - framework: "MITRE ATT&CK"
+    tactic:
+      id: "TA0004"
+      name: "Privilege Escalation"
+      reference: "https://attack.mitre.org/tactics/TA0004/"
+    technique:
+      - id: "T1033"
+        name: "System Owner/User Discovery"
+        reference: "https://attack.mitre.org/techniques/T1033/"
+        subtechnique: []
+      - id: "T1087"
+        name: "Account Discovery"
+        reference: "https://attack.mitre.org/techniques/T1087/"
+        subtechnique: []
+
+note: |
+  ### Investigation Steps:
+  1. **Examine Process Details**: Review the full command line arguments, parent process, and user associated with the `whoami` execution.
+  2. **User Context**: Determine if the user executing `whoami` is a standard user, a service account, or a privileged user. Unexpected execution by non-privileged users or service accounts could indicate compromise.
+  3. **Host Activity**: Investigate other processes and network connections on the host around the time of the alert. Look for suspicious activity, such as unusual logins, file modifications, or outbound connections.
+  4. **Timeline Analysis**: Correlate this event with other security events on the host and across the environment to build a complete picture of activity.
+  
+  ### False Positive Analysis:
+  * **Legitimate Administrative Activity**: System administrators or authorized users might legitimately use `whoami` for troubleshooting or scripting. Verify if the activity aligns with known administrative tasks.
+  * **Automated Scripts**: Some legitimate scripts or automation tools might include `whoami` for environment checks. Review the script's purpose and origin.
+  
+  ### Response and Remediation:
+  1. **Confirm Malicious Intent**: If the activity is deemed malicious, isolate the affected host to prevent further compromise.
+  2. **Containment**: Terminate any malicious processes and remove persistence mechanisms.
+  3. **Eradication**: Identify and remove the root cause of the compromise, such as exploited vulnerabilities or compromised credentials.
+  4. **Recovery**: Restore affected systems from clean backups and implement stronger security controls to prevent recurrence.
+
+false_positives:
+  - "Legitimate administrative activity"
+  - "Automated scripts or tools"
+
+references:
+  - "https://www.elastic.co/guide/en/security/current/prebuilt-rules-8-10-2-detection-rule-reference.html#whoami-execution"
+
+max_signals: 100
+actions: []
