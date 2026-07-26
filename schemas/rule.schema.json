@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "DaC Detection Rule Schema v1 — ES|QL Only — Elastic 9.4.3",
+  "title": "DaC Detection Rule Schema v1 \u2014 ES|QL Only \u2014 Elastic 9.4.3",
   "type": "object",
   "required": [
     "schema_version",
@@ -36,7 +36,12 @@
     },
     "metadata": {
       "type": "object",
-      "required": ["creation_date", "updated_date", "maturity", "author"],
+      "required": [
+        "creation_date",
+        "updated_date",
+        "maturity",
+        "author"
+      ],
       "additionalProperties": false,
       "properties": {
         "creation_date": {
@@ -49,12 +54,19 @@
         },
         "maturity": {
           "type": "string",
-          "enum": ["production", "development", "deprecated"]
+          "enum": [
+            "production",
+            "development",
+            "deprecated"
+          ]
         },
         "author": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -64,16 +76,20 @@
     },
     "name": {
       "type": "string",
-      "minLength": 5
+      "minLength": 5,
+      "pattern": "^SOC-UC-[0-9]{3}-"
     },
     "description": {
       "type": "string",
-      "minLength": 10
+      "minLength": 50
     },
     "author": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "enabled": {
       "type": "boolean"
@@ -88,7 +104,12 @@
     },
     "severity": {
       "type": "string",
-      "enum": ["low", "medium", "high", "critical"]
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
     },
     "risk_score": {
       "type": "integer",
@@ -98,7 +119,10 @@
     "tags": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "query": {
       "type": "string",
@@ -128,7 +152,11 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["framework", "tactic", "technique"],
+        "required": [
+          "framework",
+          "tactic",
+          "technique"
+        ],
         "additionalProperties": false,
         "properties": {
           "framework": {
@@ -137,12 +165,26 @@
           },
           "tactic": {
             "type": "object",
-            "required": ["id", "name", "reference"],
+            "required": [
+              "id",
+              "name",
+              "reference"
+            ],
             "additionalProperties": false,
             "properties": {
-              "id":        { "type": "string", "minLength": 1 },
-              "name":      { "type": "string", "minLength": 1 },
-              "reference": { "type": "string", "minLength": 1 }
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^TA[0-9]{4}$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reference": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           },
           "technique": {
@@ -150,22 +192,53 @@
             "minItems": 1,
             "items": {
               "type": "object",
-              "required": ["id", "name", "reference", "subtechnique"],
+              "required": [
+                "id",
+                "name",
+                "reference",
+                "subtechnique"
+              ],
               "additionalProperties": false,
               "properties": {
-                "id":        { "type": "string", "minLength": 1 },
-                "name":      { "type": "string", "minLength": 1 },
-                "reference": { "type": "string", "minLength": 1 },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^T[0-9]{4}(\\.[0-9]{3})?$"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reference": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^https://attack\\.mitre\\.org/"
+                },
                 "subtechnique": {
                   "type": "array",
                   "items": {
                     "type": "object",
-                    "required": ["id", "name", "reference"],
+                    "required": [
+                      "id",
+                      "name",
+                      "reference"
+                    ],
                     "additionalProperties": false,
                     "properties": {
-                      "id":        { "type": "string", "minLength": 1 },
-                      "name":      { "type": "string", "minLength": 1 },
-                      "reference": { "type": "string", "minLength": 1 }
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^T[0-9]{4}\\.[0-9]{3}$"
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "reference": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^https://attack\\.mitre\\.org/"
+                      }
                     }
                   }
                 }
@@ -173,19 +246,28 @@
             }
           }
         }
-      }
+      },
+      "minItems": 1
     },
     "note": {
       "type": "string",
-      "minLength": 10
+      "minLength": 200
     },
     "false_positives": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
     },
     "references": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
     },
     "max_signals": {
       "type": "integer",
