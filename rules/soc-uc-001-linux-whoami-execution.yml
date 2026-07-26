@@ -38,10 +38,11 @@ tags:
   - "Data Source: Elastic Defend"
 
 query: |
-  FROM logs-endpoint.events.*
+  FROM logs-endpoint.events.process-default METADATA _id, _index, _version
   | WHERE event.action == "exec"
     AND process.name == "whoami && id"
-  | KEEP @timestamp, host.name, user.name,
+  | KEEP _id, _index, _version,
+         @timestamp, host.name, user.name,
          process.name, process.command_line,
          event.dataset
   | RENAME event.dataset AS logSource
