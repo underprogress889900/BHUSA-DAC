@@ -187,6 +187,103 @@ jobs:
               sys.exit(1)
           PYEOF
 
+      # ── cross-field consistency ──────────────────────────────────────────
+      # JSON Schema validates fields in isolation. These are the rules that only
+      # make sense across fields, plus the repo-wide uniqueness checks — a
+      # duplicate rule_id is silent and destructive: deploy.yml PUTs every rule by
+      # rule_id, so the second file simply overwrites the first in Elastic.
+      - name: Cross-field and uniqueness checks
+        if: always()
+        run: |
+          python3 << 'PYEOF'
+          import yaml, glob, re, sys
+          from collections import defaultdict
+
+          RISK = {"low": 21, "medium": 47, "high": 73, "critical": 99}
+          NOTE_SECTIONS = [
+              "What triggered this alert",
+              "Possible investigation steps",
+              "False positive analysis",
+              "Response and remediation",
+              "References",
+          ]
+
+          def interval_minutes(v):
+              m = re.match(r"^(\d+)([mh])$", str(v or ""))
+              return None if not m else int(m.group(1)) * (60 if m.group(2) == "h" else 1)
+
+          def from_minutes(v):
+              m = re.match(r"^now-(\d+)([smh])$", str(v or ""))
+              if not m: return None
+              n, u = int(m.group(1)), m.group(2)
+              return n / 60 if u == "s" else n * (60 if u == "h" else 1)
+
+          rules = sorted([f for f in glob.glob("rules/*.yml") if ".gitkeep" not in f])
+          if not rules:
+              sys.exit(0)
+
+          failed = []
+          by_id, by_name = defaultdict(list), defaultdict(list)
+
+          for filepath in rules:
+              try:
+                  rule = yaml.safe_load(open(filepath))
+              except yaml.YAMLError:
+                  continue
+
+              name = rule.get("name", filepath)
+              problems = []
+
+              by_id[str(rule.get("rule_id", "")).strip()].append(filepath)
+              by_name[str(rule.get("name", "")).strip()].append(filepath)
+
+              sev, risk = rule.get("severity"), rule.get("risk_score")
+              if sev in RISK and risk != RISK[sev]:
+                  problems.append(
+                      f"severity '{sev}' requires risk_score {RISK[sev]}, found {risk}")
+
+              iv, fr = interval_minutes(rule.get("interval")), from_minutes(rule.get("from"))
+              if iv is not None and fr is not None and abs(fr - (iv + 5)) > 1e-9:
+                  problems.append(
+                      f"from '{rule.get('from')}' must equal interval "
+                      f"'{rule.get('interval')}' + 5m (expected now-{iv + 5}m) — "
+                      "a shorter lookback silently drops events between runs")
+
+              note = str(rule.get("note", "") or "")
+              missing = [h for h in NOTE_SECTIONS if h not in note]
+              if missing:
+                  problems.append("investigation guide is missing: " + ", ".join(missing))
+
+              if problems:
+                  print(f"FAIL: {name}")
+                  for pr in problems:
+                      print(f"  {pr}")
+                  failed.extend(f"{name}: {pr}" for pr in problems)
+                  open("failed_files.txt", "a").write(filepath + "\n")
+              else:
+                  print(f"PASS: {name}")
+
+          for rid, files in by_id.items():
+              if rid and len(files) > 1:
+                  msg = f"duplicate rule_id {rid} in: {', '.join(files)} — deploy would " \
+                        "overwrite one rule with the other in Elastic"
+                  print(f"FAIL: {msg}")
+                  failed.append(msg)
+                  for f in files:
+                      open("failed_files.txt", "a").write(f + "\n")
+
+          for nm, files in by_name.items():
+              if nm and len(files) > 1:
+                  msg = f"duplicate rule name '{nm}' in: {', '.join(files)}"
+                  print(f"FAIL: {msg}")
+                  failed.append(msg)
+
+          if failed:
+              with open("validation_errors.txt", "a") as fh:
+                  fh.write("## cross-field\n" + "\n".join(f"- {e}" for e in failed) + "\n\n")
+              sys.exit(1)
+          PYEOF
+
       # ── ES|QL runtime execution ──────────────────────────────────────────
       # Deliberately uses ELASTIC_API_KEY — the same identity that will own the
       # deployed rule. A rule created by a key that cannot read its own index
