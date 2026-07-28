@@ -1,0 +1,128 @@
+schema_version: 1
+
+metadata:
+  creation_date: "2026/07/28"
+  updated_date:  "2026/07/28"
+  maturity: "production"
+  author:
+    - "DAC Agent (n8n)"
+
+rule_id: "bbb4fd90-e0f0-4af2-a4aa-76f77a334d18"
+
+name: "SOC-UC-005-Windows-Fake Corepack Campaign IOC Domain Contact & Dropper Execution"
+
+description: |
+  This rule detects DNS or network contact with known campaign domains, or execution of dropper filenames associated with the 2026 Corepack/OpenShield infostealer/proxyware campaign. These behaviors are highly indicative of initial access, execution, or C2 activity related to this threat. The rule is scoped to Windows endpoints with Elastic Defend telemetry and is based on threat intelligence from Socket.dev.
+
+author:
+  - "DAC Agent (n8n)"
+
+enabled: true
+type: esql
+language: esql
+
+severity: "high"
+risk_score: 73
+
+tags:
+  - "Domain: Endpoint"
+  - "OS: Windows"
+  - "Use Case: Threat Detection"
+  - "Tactic: Initial Access"
+  - "Tactic: Execution"
+  - "Tactic: Command and Control"
+  - "T1566.002"
+  - "T1204.002"
+  - "T1090.003"
+  - "Data Source: Elastic Defend"
+
+query: |
+  FROM logs-endpoint.events.* METADATA _id, _index, _version
+  | WHERE event.category == "dns" AND dns.question.name IN ("corepack.org", "moonlighthathel.org", "aifpleasurebeh.org", "ghabovethec.info", "ukankingwithea.com", "beadpie.xyz", "yakteam.xyz", "nostop.go2cloud.org", "freevpn.win", "openshield.canatrace.com")
+       OR event.category == "dns" AND dns.question.name LIKE "*.corepack.org"
+       OR event.category == "dns" AND dns.question.name LIKE "*.moonlighthathel.org"
+       OR event.category == "dns" AND dns.question.name LIKE "*.aifpleasurebeh.org"
+       OR event.category == "dns" AND dns.question.name LIKE "*.ghabovethec.info"
+       OR event.category == "dns" AND dns.question.name LIKE "*.ukankingwithea.com"
+       OR event.category == "dns" AND dns.question.name LIKE "*.beadpie.xyz"
+       OR event.category == "dns" AND dns.question.name LIKE "*.yakteam.xyz"
+       OR event.category == "dns" AND dns.question.name LIKE "*.freevpn.win"
+       OR event.category == "dns" AND dns.question.name LIKE "*.canatrace.com"
+       OR event.category == "network" AND network.direction == "outbound" AND destination.domain IN ("corepack.org", "moonlighthathel.org", "aifpleasurebeh.org", "ghabovethec.info", "ukankingwithea.com", "beadpie.xyz", "yakteam.xyz", "nostop.go2cloud.org", "freevpn.win", "openshield.canatrace.com")
+       OR event.category == "network" AND destination.domain LIKE "*.corepack.org"
+       OR event.category == "network" AND destination.domain LIKE "*.moonlighthathel.org"
+       OR event.category == "network" AND destination.domain LIKE "*.aifpleasurebeh.org"
+       OR event.category == "network" AND destination.domain LIKE "*.ghabovethec.info"
+       OR event.category == "network" AND destination.domain LIKE "*.ukankingwithea.com"
+       OR event.category == "network" AND destination.domain LIKE "*.beadpie.xyz"
+       OR event.category == "network" AND destination.domain LIKE "*.yakteam.xyz"
+       OR event.category == "network" AND destination.domain LIKE "*.freevpn.win"
+       OR event.category == "network" AND destination.domain LIKE "*.canatrace.com"
+       OR event.category == "process" AND event.action == "exec" AND process.name IN ("vpnsetup_d9gfqvs3dsic73fcvi90.exe", "OperaGXSetup.exe")
+  | KEEP _id, _index, _version, event.category, dns.question.name, destination.domain, network.direction, process.name, event.action, user.name, host.name, @timestamp
+
+interval: "5m"
+from: "now-10m"
+to: "now"
+
+timestamp_override: "event.ingested"
+timestamp_override_fallback_disabled: false
+
+threat:
+  - framework: "MITRE ATT&CK"
+    tactic:
+      id: "TA0001"
+      name: "Initial Access"
+      reference: "https://attack.mitre.org/tactics/TA0001/"
+    technique:
+      - id: "T1566.002"
+        name: "Spearphishing Link"
+        reference: "https://attack.mitre.org/techniques/T1566/002/"
+        subtechnique: []
+      - id: "T1204.002"
+        name: "Malicious File"
+        reference: "https://attack.mitre.org/techniques/T1204/002/"
+        subtechnique: []
+      - id: "T1090.003"
+        name: "Multi-hop Proxy"
+        reference: "https://attack.mitre.org/techniques/T1090/003/"
+        subtechnique: []
+
+note: |
+  ### What triggered this alert
+  This alert was triggered by DNS or network contact with known Corepack/OpenShield campaign domains, or execution of dropper binaries (vpnsetup_d9gfqvs3dsic73fcvi90.exe, OperaGXSetup.exe). These behaviors are strongly associated with initial access, execution, or C2 activity from this campaign.
+  
+  ### Possible investigation steps
+  1. Review dns.question.name and destination.domain for matches to known campaign infrastructure.
+  2. Check process.name and event.action for evidence of suspicious binary execution.
+  3. Pivot on user.name and host.name to determine the scope of exposure.
+  4. Examine network.direction to confirm outbound C2 or data exfiltration attempts.
+  5. Review recent downloads, email attachments, or npm package installations on the host.
+  
+  ### False positive analysis
+  - Some benign software or VPN installers may contact similar domains or use similar filenames. Confirm the domain reputation, binary hash, and user intent before escalating.
+  
+  ### Response and remediation
+  - Isolate the affected endpoint from the network.
+  - Collect memory and disk images for forensic analysis.
+  - Remove any unauthorized binaries or scheduled tasks.
+  - Block campaign domains at the network perimeter.
+  - Hunt for similar activity across the environment using dns.question.name, destination.domain, and process.name.
+  
+  ### References
+  - https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware
+  - https://attack.mitre.org/techniques/T1566/002/
+  - https://attack.mitre.org/techniques/T1204/002/
+  - https://attack.mitre.org/techniques/T1090/003/
+
+false_positives:
+  - "Benign VPN installers or legitimate software contacting similar domains or using similar filenames."
+
+references:
+  - "https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware"
+  - "https://attack.mitre.org/techniques/T1566/002/"
+  - "https://attack.mitre.org/techniques/T1204/002/"
+  - "https://attack.mitre.org/techniques/T1090/003/"
+
+max_signals: 100
+actions: []
