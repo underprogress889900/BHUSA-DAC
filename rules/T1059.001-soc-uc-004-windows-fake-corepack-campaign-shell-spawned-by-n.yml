@@ -1,0 +1,109 @@
+schema_version: 1
+
+metadata:
+  creation_date: "2026/07/28"
+  updated_date:  "2026/07/28"
+  maturity: "production"
+  author:
+    - "DAC Agent (n8n)"
+
+rule_id: "3cb4588b-1913-41a1-a5ff-c4d342a41d67"
+
+name: "SOC-UC-004-Windows-Fake Corepack Campaign Shell Spawned by Node/npm/Corepack"
+
+description: |
+  This rule detects PowerShell or cmd.exe shells spawned by Node.js, npm, npx, or corepack processes, with command lines indicative of encoded or download activity. This behavior is characteristic of malicious npm post-install scripts, as seen in the 2026 Corepack/OpenShield infostealer/proxyware campaign. The rule is scoped to Windows endpoints with Elastic Defend telemetry and is based on threat intelligence from Socket.dev.
+
+author:
+  - "DAC Agent (n8n)"
+
+enabled: true
+type: esql
+language: esql
+
+severity: "high"
+risk_score: 73
+
+tags:
+  - "Domain: Endpoint"
+  - "OS: Windows"
+  - "Use Case: Threat Detection"
+  - "Tactic: Execution"
+  - "T1059.001"
+  - "T1059.003"
+  - "T1204.002"
+  - "Data Source: Elastic Defend"
+
+query: |
+  FROM logs-endpoint.events.* METADATA _id, _index, _version
+  | WHERE event.category == "process" AND event.action == "exec"
+    AND process.name IN ("powershell.exe", "pwsh.exe", "cmd.exe")
+    AND process.parent.name IN ("node.exe", "npm", "npx", "corepack")
+    AND (process.command_line LIKE "*EncodedCommand*" OR process.command_line LIKE "*DownloadString*" OR process.command_line LIKE "*Invoke-WebRequest*" OR process.command_line LIKE "*curl*" OR process.command_line LIKE "*wget*")
+  | KEEP _id, _index, _version, event.category, event.action, process.name, process.parent.name, process.command_line, process.executable, process.hash.sha256, user.name, host.name, @timestamp
+
+interval: "5m"
+from: "now-10m"
+to: "now"
+
+timestamp_override: "event.ingested"
+timestamp_override_fallback_disabled: false
+
+threat:
+  - framework: "MITRE ATT&CK"
+    tactic:
+      id: "TA0002"
+      name: "Execution"
+      reference: "https://attack.mitre.org/tactics/TA0002/"
+    technique:
+      - id: "T1059.001"
+        name: "PowerShell"
+        reference: "https://attack.mitre.org/techniques/T1059/001/"
+        subtechnique: []
+      - id: "T1059.003"
+        name: "Windows Command Shell"
+        reference: "https://attack.mitre.org/techniques/T1059/003/"
+        subtechnique: []
+      - id: "T1204.002"
+        name: "Malicious File"
+        reference: "https://attack.mitre.org/techniques/T1204/002/"
+        subtechnique: []
+
+note: |
+  ### What triggered this alert
+  This alert was triggered by a PowerShell or cmd.exe process being spawned by Node.js, npm, npx, or corepack, with a command line containing signs of encoded or download activity (e.g., EncodedCommand, DownloadString, Invoke-WebRequest, curl, wget). This is highly suspicious and associated with malicious npm post-install scripts as seen in the Corepack/OpenShield campaign.
+  
+  ### Possible investigation steps
+  1. Review process.command_line for obfuscated or encoded commands, or suspicious download activity.
+  2. Check process.parent.name and process.parent.command_line (if available) to determine what initiated the shell.
+  3. Examine process.executable and process.hash.sha256 for unsigned or unknown binaries.
+  4. Pivot on user.name and host.name to see if this behavior is widespread or isolated.
+  5. Review recent npm or node package installations on the host.
+  
+  ### False positive analysis
+  - Some legitimate developer automation tools or build scripts may invoke shells from Node/npm for benign reasons. Confirm the script source, code signature, and user intent before escalating.
+  
+  ### Response and remediation
+  - Isolate the affected endpoint from the network.
+  - Collect memory and disk images for forensic analysis.
+  - Remove any unauthorized scripts or binaries.
+  - Review and restrict npm package sources and audit recent installations.
+  - Hunt for similar activity across the environment using process.parent.name and process.command_line.
+  
+  ### References
+  - https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://attack.mitre.org/techniques/T1059/003/
+  - https://attack.mitre.org/techniques/T1204/002/
+
+false_positives:
+  - "Legitimate developer automation or build scripts that invoke shells from Node/npm for setup or deployment tasks."
+
+references:
+  - "https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware"
+  - "https://attack.mitre.org/techniques/T1059/001/"
+  - "https://attack.mitre.org/techniques/T1059/003/"
+  - "https://attack.mitre.org/techniques/T1204/002/"
+
+max_signals: 100
+actions: []
