@@ -1,0 +1,106 @@
+schema_version: 1
+
+metadata:
+  creation_date: "2026/07/28"
+  updated_date:  "2026/07/28"
+  maturity: "production"
+  author:
+    - "DAC Agent (n8n)"
+
+rule_id: "4e36d73d-9cb0-4dd9-8c32-45d91a2c0761"
+
+name: "SOC-UC-003-Windows-Fake Corepack Campaign Persistence & Credential Harvesting"
+
+description: |
+  This rule detects two key behaviors associated with the 2026 Corepack/OpenShield infostealer/proxyware campaign: (1) persistence via suspicious registry Run key modifications by reg.exe, and (2) credential harvesting by campaign installer processes accessing browser credential stores. These behaviors are highly indicative of malware attempting to maintain access and steal credentials on Windows endpoints. The rule is scoped to Windows environments with Elastic Defend endpoint telemetry and is based on threat intelligence from Socket.dev.
+
+author:
+  - "DAC Agent (n8n)"
+
+enabled: true
+type: esql
+language: esql
+
+severity: "high"
+risk_score: 73
+
+tags:
+  - "Domain: Endpoint"
+  - "OS: Windows"
+  - "Use Case: Threat Detection"
+  - "Tactic: Persistence"
+  - "Tactic: Credential Access"
+  - "T1547.001"
+  - "T1552.001"
+  - "Data Source: Elastic Defend"
+
+query: |
+  FROM logs-endpoint.events.* METADATA _id, _index, _version
+  | WHERE (event.category == "process" AND event.action == "exec" AND process.name == "reg.exe"
+          AND process.command_line LIKE "*add*Run*" AND NOT process.parent.name IN ("msiexec.exe","setup.exe","install.exe"))
+     OR (event.category == "file" AND event.action IN ("create", "modify")
+          AND file.name IN ("Login Data", "logins.json", "key4.db")
+          AND process.name IN ("vpnsetup_d9gfqvs3dsic73fcvi90.exe", "OperaGXSetup.exe", "OpenShield.exe", "Apprunner.exe"))
+  | KEEP _id, _index, _version, event.category, event.action, process.name, process.command_line, process.parent.name, file.name, file.path, process.executable, user.name, host.name, @timestamp
+
+interval: "5m"
+from: "now-10m"
+to: "now"
+
+timestamp_override: "event.ingested"
+timestamp_override_fallback_disabled: false
+
+threat:
+  - framework: "MITRE ATT&CK"
+    tactic:
+      id: "TA0003"
+      name: "Persistence"
+      reference: "https://attack.mitre.org/tactics/TA0003/"
+    technique:
+      - id: "T1547.001"
+        name: "Registry Run Keys / Startup Folder"
+        reference: "https://attack.mitre.org/techniques/T1547/001/"
+        subtechnique: []
+      - id: "T1552.001"
+        name: "Credentials In Files"
+        reference: "https://attack.mitre.org/techniques/T1552/001/"
+        subtechnique: []
+
+note: |
+  ### What triggered this alert
+  This alert was triggered by either:
+  - reg.exe modifying a registry Run key (indicative of persistence) where the parent process is not a known installer (msiexec.exe, setup.exe, install.exe), or
+  - A suspicious installer process (vpnsetup_d9gfqvs3dsic73fcvi90.exe, OperaGXSetup.exe, OpenShield.exe, Apprunner.exe) creating or modifying browser credential store files (Login Data, logins.json, key4.db).
+  
+  ### Possible investigation steps
+  1. Review the process.command_line and process.parent.name fields to determine the context of the registry modification. Was it user-initiated or automated?
+  2. Check process.executable and process.hash.sha256 for the installer processes to verify if they are known/signed or suspicious/unsigned.
+  3. Pivot on user.name and host.name to determine if other endpoints or users are affected.
+  4. Examine file.path and file.name for evidence of credential store tampering or unauthorized access.
+  5. Review recent downloads or email attachments that may have delivered these binaries.
+  
+  ### False positive analysis
+  - Some legitimate software updaters or enterprise deployment tools may create Run keys or touch browser credential files as part of normal operation. Examples include corporate VPN installers or browser migration tools. Confirm the process lineage and code signature status before escalating.
+  
+  ### Response and remediation
+  - Isolate the affected endpoint from the network.
+  - Collect memory and disk images for forensic analysis.
+  - Remove any unauthorized Run key entries and suspicious binaries.
+  - Reset credentials stored in affected browsers.
+  - Hunt for similar activity across the environment using process.name, file.name, and process.hash.sha256.
+  
+  ### References
+  - https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware
+  - https://attack.mitre.org/techniques/T1547/001/
+  - https://attack.mitre.org/techniques/T1552/001/
+
+false_positives:
+  - "Corporate VPN installers or browser migration tools that legitimately modify Run keys or browser credential stores."
+
+references:
+  - "https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware"
+  - "https://attack.mitre.org/techniques/T1547/001/"
+  - "https://attack.mitre.org/techniques/T1552/001/"
+
+max_signals: 100
+actions: []
