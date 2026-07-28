@@ -1,0 +1,119 @@
+schema_version: 1
+
+metadata:
+  creation_date: "2026/07/28"
+  updated_date:  "2026/07/28"
+  maturity: "production"
+  author:
+    - "DAC Agent (n8n)"
+
+rule_id: "c8bc1b1d-4644-43fe-8beb-ccb503b14b64"
+
+name: "SOC-UC-002-Windows-Browser or Node.js Spawning Shell Interpreter"
+
+description: |
+  Detects instances where a shell interpreter (powershell.exe, cmd.exe, wscript.exe, or cscript.exe) is launched by a web browser (chrome.exe, firefox.exe, msedge.exe, iexplore.exe, opera.exe) or Node.js (node.exe). This behavior is highly suspicious and often associated with initial access or execution techniques used by malware like OpenShield/Apprunner infostealer and proxyware campaigns (e.g., Fake Corepack). The rule applies to Windows endpoints monitored by Elastic Defend.
+
+author:
+  - "DAC Agent (n8n)"
+
+enabled: true
+type: esql
+language: esql
+
+severity: "high"
+risk_score: 73
+
+tags:
+  - "Domain: Endpoint"
+  - "OS: Windows"
+  - "Use Case: Threat Detection"
+  - "Tactic: Execution"
+  - "Tactic: Initial Access"
+  - "T1204.001"
+  - "T1059.001"
+  - "T1059.003"
+  - "T1566.002"
+  - "Data Source: Elastic Defend"
+
+query: |
+  FROM logs-endpoint.events.process-* METADATA _id, _index, _version
+  | WHERE process.parent.name IN ("chrome.exe", "firefox.exe", "msedge.exe", "iexplore.exe", "opera.exe", "node.exe")
+    AND process.name IN ("powershell.exe", "cmd.exe", "wscript.exe", "cscript.exe")
+    AND event.action == "start"
+  | KEEP _id, _index, _version
+
+interval: "5m"
+from: "now-10m"
+to: "now"
+
+timestamp_override: "event.ingested"
+timestamp_override_fallback_disabled: false
+
+threat:
+  - framework: "MITRE ATT&CK"
+    tactic:
+      id: "TA0002"
+      name: "Execution"
+      reference: "https://attack.mitre.org/tactics/TA0002/"
+    technique:
+      - id: "T1204.001"
+        name: "Malicious Link"
+        reference: "https://attack.mitre.org/techniques/T1204/001/"
+        subtechnique: []
+      - id: "T1059.001"
+        name: "PowerShell"
+        reference: "https://attack.mitre.org/techniques/T1059/001/"
+        subtechnique: []
+      - id: "T1059.003"
+        name: "Windows Command Shell"
+        reference: "https://attack.mitre.org/techniques/T1059/003/"
+        subtechnique: []
+      - id: "T1566.002"
+        name: "Spearphishing Link"
+        reference: "https://attack.mitre.org/techniques/T1566/002/"
+        subtechnique: []
+
+note: |
+  ### What triggered this alert
+  This alert was triggered because a shell interpreter (powershell.exe, cmd.exe, wscript.exe, or cscript.exe) was started by a parent process associated with a web browser or Node.js (chrome.exe, firefox.exe, msedge.exe, iexplore.exe, opera.exe, node.exe). This is highly unusual and often indicates a user has clicked a malicious link or a browser exploit has executed code, as seen in infostealer and proxyware campaigns like Fake Corepack.
+  
+  ### Possible investigation steps
+  - Review the process.parent.name and process.name fields to confirm the parent-child relationship.
+  - Examine process.command_line for suspicious or obfuscated arguments.
+  - Check user.name to determine which user initiated the process.
+  - Investigate process.hash.sha256 and process.executable for known malicious binaries.
+  - Review host.name to determine the endpoint involved and check for other suspicious activity around the same time (@timestamp).
+  - Pivot on process.entity_id and process.ppid to reconstruct the process tree and identify any follow-on actions or payloads.
+  - Look for related alerts or events involving the same user or host.
+  
+  ### False positive analysis
+  - Some legitimate browser extensions, developer tools, or enterprise automation platforms may spawn shell interpreters for updates or scripting. For example, legitimate IT automation or browser-based remote management tools could trigger this alert.
+  
+  ### Response and remediation
+  - Isolate the affected endpoint from the network to prevent lateral movement.
+  - Collect forensic artifacts: memory, process list, and relevant logs.
+  - Kill any suspicious or unauthorized processes.
+  - Reset credentials for affected users if compromise is confirmed.
+  - Review and block any malicious domains or URLs involved.
+  - Patch browser and Node.js installations to prevent exploitation.
+  
+  ### References
+  - https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware
+  - https://attack.mitre.org/techniques/T1204/001/
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://attack.mitre.org/techniques/T1059/003/
+  - https://attack.mitre.org/techniques/T1566/002/
+
+false_positives:
+  - "Legitimate browser extensions or IT automation tools that spawn shell interpreters for updates or scripting."
+
+references:
+  - "https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware"
+  - "https://attack.mitre.org/techniques/T1204/001/"
+  - "https://attack.mitre.org/techniques/T1059/001/"
+  - "https://attack.mitre.org/techniques/T1059/003/"
+  - "https://attack.mitre.org/techniques/T1566/002/"
+
+max_signals: 100
+actions: []
