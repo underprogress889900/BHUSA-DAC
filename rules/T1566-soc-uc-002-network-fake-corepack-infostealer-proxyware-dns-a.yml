@@ -1,0 +1,174 @@
+schema_version: 1
+
+metadata:
+  creation_date: "2026/07/28"
+  updated_date:  "2026/07/28"
+  maturity: "production"
+  author:
+    - "DAC Agent (n8n)"
+
+rule_id: "59495b69-8af3-4c43-81ee-daa52b1843b6"
+
+name: "SOC-UC-002-Network-Fake Corepack Infostealer & Proxyware DNS Activity"
+
+description: |
+  Detects DNS queries to domains associated with the Fake Corepack infostealer and OpenShield proxyware campaign. This activity is significant because these domains are linked to malware delivery, credential theft, and proxyware monetization, representing both initial access and ongoing command-and-control. The rule applies to any environment with Elastic Defend network telemetry enabled.
+
+author:
+  - "DAC Agent (n8n)"
+
+enabled: true
+type: esql
+language: esql
+
+severity: "high"
+risk_score: 73
+
+tags:
+  - "Domain: Endpoint"
+  - "Use Case: Threat Detection"
+  - "Data Source: Elastic Defend"
+  - "Tactic: Initial Access"
+  - "Tactic: Execution"
+  - "Tactic: Discovery"
+  - "Tactic: Credential Access"
+  - "Tactic: Persistence"
+  - "Tactic: Command and Control"
+  - "T1566"
+  - "T1204.002"
+  - "T1059.001"
+  - "T1059.003"
+  - "T1082"
+  - "T1057"
+  - "T1552.001"
+  - "T1555"
+  - "T1547.001"
+  - "T1090.003"
+
+query: |
+  FROM logs-endpoint.events.* METADATA _id, _index, _version
+  | WHERE @timestamp > NOW() - 30 DAYS
+    AND event.category == "dns"
+    AND dns.question.name IN (
+      "corepack.org",
+      "moonlighthathel.org",
+      "aifpleasurebeh.org",
+      "ghabovethec.info",
+      "ukankingwithea.com",
+      "beadpie.xyz",
+      "yakteam.xyz",
+      "nostop.go2cloud.org"
+    )
+  | KEEP @timestamp, host.name, user.name, dns.question.name, dns.question.type, process.name, network.protocol, _id, _index, _version
+  | LIMIT 100
+
+interval: "5m"
+from: "now-10m"
+to: "now"
+
+timestamp_override: "event.ingested"
+timestamp_override_fallback_disabled: false
+
+threat:
+  - framework: "MITRE ATT&CK"
+    tactic:
+      id: "TA0001"
+      name: "Initial Access"
+      reference: "https://attack.mitre.org/tactics/TA0001/"
+    technique:
+      - id: "T1566"
+        name: "Internal Spearphishing"
+        reference: "https://attack.mitre.org/techniques/T1566/"
+        subtechnique: []
+      - id: "T1204.002"
+        name: "Malicious File"
+        reference: "https://attack.mitre.org/techniques/T1204/002/"
+        subtechnique: []
+      - id: "T1059.001"
+        name: "PowerShell"
+        reference: "https://attack.mitre.org/techniques/T1059/001/"
+        subtechnique: []
+      - id: "T1059.003"
+        name: "Windows Command Shell"
+        reference: "https://attack.mitre.org/techniques/T1059/003/"
+        subtechnique: []
+      - id: "T1082"
+        name: "System Information Discovery"
+        reference: "https://attack.mitre.org/techniques/T1082/"
+        subtechnique: []
+      - id: "T1057"
+        name: "Process Discovery"
+        reference: "https://attack.mitre.org/techniques/T1057/"
+        subtechnique: []
+      - id: "T1552.001"
+        name: "Credentials In Files"
+        reference: "https://attack.mitre.org/techniques/T1552/001/"
+        subtechnique: []
+      - id: "T1555"
+        name: "Credentials from Web Browsers"
+        reference: "https://attack.mitre.org/techniques/T1555/"
+        subtechnique: []
+      - id: "T1547.001"
+        name: "Registry Run Keys / Startup Folder"
+        reference: "https://attack.mitre.org/techniques/T1547/001/"
+        subtechnique: []
+      - id: "T1090.003"
+        name: "Multi-hop Proxy"
+        reference: "https://attack.mitre.org/techniques/T1090/003/"
+        subtechnique: []
+
+note: |
+  ### What triggered this alert
+  This alert was triggered by a DNS query to a domain known to be associated with the Fake Corepack infostealer and OpenShield proxyware campaign. These domains are linked to malware delivery, credential theft, and proxyware monetization. The detection is based on a match to a curated list of malicious domains observed in recent threat intelligence.
+  
+  ### Possible investigation steps
+  - Review the host.name and user.name fields to identify the affected endpoint and user.
+  - Examine process.name to determine which process initiated the DNS request; suspicious or unexpected processes (e.g., powershell.exe, cmd.exe, or unknown binaries) may indicate malicious activity.
+  - Check for additional DNS queries to other suspicious domains from the same host or user.
+  - Investigate recent process execution and file creation events on the endpoint for signs of malware installation or persistence mechanisms.
+  - Review network.protocol and dns.question.type for evidence of DNS tunneling or non-standard DNS usage.
+  - Correlate with authentication and credential access logs for signs of credential theft or lateral movement.
+  
+  ### False positive analysis
+  - Some legitimate software or IT tools may contact domains that have been recently compromised or repurposed for malicious use. For example, a security researcher or automated sandbox may trigger this alert during threat research or malware analysis.
+  - Confirm with the user or asset owner if the activity was expected or part of a legitimate workflow.
+  
+  ### Response and remediation
+  - Isolate the affected endpoint from the network to prevent further malicious activity.
+  - Collect forensic artifacts: memory dump, running processes, recent files, and DNS cache.
+  - Remove any identified malware or unauthorized proxyware.
+  - Reset credentials used on the affected system.
+  - Monitor for further suspicious DNS or network activity from the same user or host.
+  - Apply threat intelligence updates to block known malicious domains at the network perimeter.
+  
+  ### References
+  - https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware
+  - https://attack.mitre.org/techniques/T1566/
+  - https://attack.mitre.org/techniques/T1204/002/
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://attack.mitre.org/techniques/T1059/003/
+  - https://attack.mitre.org/techniques/T1082/
+  - https://attack.mitre.org/techniques/T1057/
+  - https://attack.mitre.org/techniques/T1552/001/
+  - https://attack.mitre.org/techniques/T1555/
+  - https://attack.mitre.org/techniques/T1547/001/
+  - https://attack.mitre.org/techniques/T1090/003/
+
+false_positives:
+  - "Security research sandboxes or malware analysis environments triggering known malicious domains."
+
+references:
+  - "https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware"
+  - "https://attack.mitre.org/techniques/T1566/"
+  - "https://attack.mitre.org/techniques/T1204/002/"
+  - "https://attack.mitre.org/techniques/T1059/001/"
+  - "https://attack.mitre.org/techniques/T1059/003/"
+  - "https://attack.mitre.org/techniques/T1082/"
+  - "https://attack.mitre.org/techniques/T1057/"
+  - "https://attack.mitre.org/techniques/T1552/001/"
+  - "https://attack.mitre.org/techniques/T1555/"
+  - "https://attack.mitre.org/techniques/T1547/001/"
+  - "https://attack.mitre.org/techniques/T1090/003/"
+
+max_signals: 100
+actions: []
