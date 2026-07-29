@@ -1,0 +1,104 @@
+schema_version: 1
+
+metadata:
+  creation_date: "2026/07/29"
+  updated_date:  "2026/07/29"
+  maturity: "production"
+  author:
+    - "DAC Agent (n8n)"
+
+rule_id: "2757391c-990d-4290-9e75-fe72f18ea2d9"
+
+name: "SOC-UC-003-Windows-DNS Query or Outbound Network Connection to Fake VPN Campaign C2/Hosting Domains"
+
+description: |
+  Detects DNS resolution attempts or outbound TCP/HTTP/HTTPS connections to 10 domains identified by threat intelligence as command-and-control (C2) or hosting infrastructure for a fake VPN installer malware campaign. This detection is critical for identifying initial access or C2 activity associated with known malicious infrastructure targeting Windows endpoints monitored by Elastic Defend.
+
+author:
+  - "DAC Agent (n8n)"
+
+enabled: true
+type: esql
+language: esql
+
+severity: "critical"
+risk_score: 99
+
+tags:
+  - "Domain: Endpoint"
+  - "OS: Windows"
+  - "Use Case: Threat Detection"
+  - "Tactic: Command and Control"
+  - "T1583.001"
+  - "T1071.001"
+  - "T1204.002"
+  - "Data Source: Elastic Defend"
+
+query: |
+  FROM logs-endpoint.events.network-default METADATA _id, _index, _version | WHERE @timestamp > NOW() - 7 DAYS AND event.category == "dns" AND dns.question.name IN ("corepack.org", "openshield.canatrace.com", "freevpn.win", "moonlighthathel.org", "aifpleasurebeh.org", "ghabovethec.info", "ukankingwithea.com", "beadpie.xyz", "yakteam.xyz", "nostop.go2cloud.org") | KEEP @timestamp, host.name, user.name, dns.question.name, dns.question.type, source.ip, process.name, _id, _index, _version | LIMIT 200
+
+interval: "5m"
+from: "now-10m"
+to: "now"
+
+timestamp_override: "event.ingested"
+timestamp_override_fallback_disabled: false
+
+threat:
+  - framework: "MITRE ATT&CK"
+    tactic:
+      id: "TA0011"
+      name: "Command and Control"
+      reference: "https://attack.mitre.org/tactics/TA0011/"
+    technique:
+      - id: "T1583.001"
+        name: "Domains"
+        reference: "https://attack.mitre.org/techniques/T1583/001/"
+        subtechnique: []
+      - id: "T1071.001"
+        name: "Web Protocols"
+        reference: "https://attack.mitre.org/techniques/T1071/001/"
+        subtechnique: []
+      - id: "T1204.002"
+        name: "Malicious File"
+        reference: "https://attack.mitre.org/techniques/T1204/002/"
+        subtechnique: []
+
+note: |
+  ### What triggered this alert
+  This alert was triggered when a DNS query or outbound network connection was made to one of 10 domains known to be associated with a fake VPN installer malware campaign. These domains have been identified by threat intelligence as C2 or payload hosting infrastructure. Such activity is highly suspicious and may indicate malware attempting to establish command-and-control or download additional payloads.
+  
+  ### Possible investigation steps
+  - Review the process (`process.name`) that initiated the DNS query or connection for suspicious or unexpected behavior.
+  - Check the user account (`user.name`) and host (`host.name`) involved for signs of compromise or unusual activity.
+  - Investigate the source IP (`source.ip`) to determine if other suspicious activity originated from the same host.
+  - Pivot on the queried domain (`dns.question.name`) across your environment to identify additional affected hosts.
+  - Review recent downloads or executed files on the host for evidence of fake VPN installers or other malware.
+  
+  ### False positive analysis
+  - Some benign software or browser plugins may contact these domains if they have been compromised or if the domains have been recently repurposed. Confirm the legitimacy of the process and user involved.
+  
+  ### Response and remediation
+  - Isolate the affected host from the network to prevent further C2 communication.
+  - Collect forensic evidence: network logs, process details, and memory images if possible.
+  - Remove any malicious files or unauthorized software identified during investigation.
+  - Reset credentials and monitor for further suspicious activity.
+  - Notify threat intelligence teams to update blocklists and detection rules as needed.
+  
+  ### References
+  - https://attack.mitre.org/techniques/T1583/001/
+  - https://attack.mitre.org/techniques/T1071/001/
+  - https://attack.mitre.org/techniques/T1204/002/
+  - https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware
+
+false_positives:
+  - "Benign software or browser plugins that may contact these domains if they have been compromised or if the domains have been repurposed."
+
+references:
+  - "https://attack.mitre.org/techniques/T1583/001/"
+  - "https://attack.mitre.org/techniques/T1071/001/"
+  - "https://attack.mitre.org/techniques/T1204/002/"
+  - "https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware"
+
+max_signals: 100
+actions: []
