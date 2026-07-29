@@ -1,0 +1,106 @@
+schema_version: 1
+
+metadata:
+  creation_date: "2026/07/29"
+  updated_date:  "2026/07/29"
+  maturity: "production"
+  author:
+    - "DAC Agent (n8n)"
+
+rule_id: "3abf38af-6db2-4646-b8e5-b5ee716e0c20"
+
+name: "SOC-UC-004-Windows-Fake VPN or Browser Installer Binary Execution — Campaign IOC Process Match"
+
+description: |
+  Detects execution of campaign-specific malicious installer binaries (vpnsetup_d9gfqvs3dsic73fcvi90.exe or OperaGXSetup.exe) identified by threat intelligence as fake VPN/browser installer droppers. These binaries masquerade as legitimate software installers to achieve initial code execution (T1204.002). Process name is matched exactly against both IOC filenames; process.executable and working_directory are returned to confirm execution from user-writable staging paths. Applies to Windows endpoints monitored by Elastic Defend.
+
+author:
+  - "DAC Agent (n8n)"
+
+enabled: true
+type: esql
+language: esql
+
+severity: "high"
+risk_score: 73
+
+tags:
+  - "Domain: Endpoint"
+  - "OS: Windows"
+  - "Use Case: Threat Detection"
+  - "Tactic: Execution"
+  - "T1204.002"
+  - "T1059.001"
+  - "T1059.003"
+  - "Data Source: Elastic Defend"
+
+query: |
+  FROM logs-endpoint.events.process-default METADATA _id, _index, _version | WHERE @timestamp > NOW() - 7 DAYS AND event.category == "process" AND event.action == "exec" AND process.name IN ("vpnsetup_d9gfqvs3dsic73fcvi90.exe", "OperaGXSetup.exe") | KEEP @timestamp, host.name, user.name, process.name, process.executable, process.command_line, process.parent.name, process.working_directory, process.hash.sha256, process.code_signature.status, process.entity_id, _id, _index, _version | LIMIT 200
+
+interval: "5m"
+from: "now-10m"
+to: "now"
+
+timestamp_override: "event.ingested"
+timestamp_override_fallback_disabled: false
+
+threat:
+  - framework: "MITRE ATT&CK"
+    tactic:
+      id: "TA0002"
+      name: "Execution"
+      reference: "https://attack.mitre.org/tactics/TA0002/"
+    technique:
+      - id: "T1204.002"
+        name: "Malicious File"
+        reference: "https://attack.mitre.org/techniques/T1204/002/"
+        subtechnique: []
+      - id: "T1059.001"
+        name: "PowerShell"
+        reference: "https://attack.mitre.org/techniques/T1059/001/"
+        subtechnique: []
+      - id: "T1059.003"
+        name: "Windows Command Shell"
+        reference: "https://attack.mitre.org/techniques/T1059/003/"
+        subtechnique: []
+
+note: |
+  ### What triggered this alert
+  This alert was triggered when a process with the exact name vpnsetup_d9gfqvs3dsic73fcvi90.exe or OperaGXSetup.exe was executed. These filenames are known IOCs for fake VPN or browser installer droppers used in recent malware campaigns. Such binaries often masquerade as legitimate installers to gain initial execution on a system and may deliver additional payloads or establish persistence.
+  
+  ### Possible investigation steps
+  - Review the full command line (`process.command_line`) and executable path (`process.executable`) to determine where the binary was run from and with what arguments.
+  - Check the working directory (`process.working_directory`) for signs of execution from user-writable or temporary paths.
+  - Investigate the parent process (`process.parent.name`) to determine how the installer was launched (e.g., from a browser, email client, or script).
+  - Validate the code signature status (`process.code_signature.status`) and hash (`process.hash.sha256`) of the binary to confirm if it is unsigned or matches known malware.
+  - Review the user (`user.name`) and host (`host.name`) involved for additional suspicious activity or signs of compromise.
+  - Search for other instances of these filenames or hashes across your environment.
+  
+  ### False positive analysis
+  - Rare, but possible if legitimate software is renamed to match these IOCs or if security testing tools are used in the environment.
+  - Confirm the source and intent of the installer with the user and check for legitimate business justification.
+  
+  ### Response and remediation
+  - Isolate the affected host to prevent further execution or lateral movement.
+  - Collect forensic evidence: process tree, binaries, command lines, and relevant logs.
+  - Remove any malicious files or unauthorized installers from the system.
+  - Reset credentials if compromise is suspected and monitor for further suspicious activity.
+  - Review and update endpoint protection policies to block known malicious installers.
+  
+  ### References
+  - https://attack.mitre.org/techniques/T1204/002/
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://attack.mitre.org/techniques/T1059/003/
+  - https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware
+
+false_positives:
+  - "Legitimate software renamed to match these IOCs or use of security testing tools."
+
+references:
+  - "https://attack.mitre.org/techniques/T1204/002/"
+  - "https://attack.mitre.org/techniques/T1059/001/"
+  - "https://attack.mitre.org/techniques/T1059/003/"
+  - "https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware"
+
+max_signals: 100
+actions: []
