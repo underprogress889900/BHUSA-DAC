@@ -1,0 +1,96 @@
+schema_version: 1
+
+metadata:
+  creation_date: "2026/07/29"
+  updated_date:  "2026/07/29"
+  maturity: "production"
+  author:
+    - "DAC Agent (n8n)"
+
+rule_id: "75a5658b-1f0e-42b0-bbfb-51fc44786266"
+
+name: "SOC-UC-003-Windows-Registry Run Key/Startup Folder Persistence by Suspicious Process"
+
+description: |
+  Detects creation or modification of files in the Startup folder or Run key locations by suspicious processes such as script engines, Node.js, or Windows LOLBINs. This behavior is commonly used by malware, including infostealer and proxyware campaigns like Fake Corepack, to achieve persistence on Windows endpoints. The rule applies to environments with Elastic Defend file telemetry enabled.
+
+author:
+  - "DAC Agent (n8n)"
+
+enabled: true
+type: esql
+language: esql
+
+severity: "high"
+risk_score: 73
+
+tags:
+  - "Domain: Endpoint"
+  - "OS: Windows"
+  - "Use Case: Threat Detection"
+  - "Tactic: Persistence"
+  - "T1547.001"
+  - "Data Source: Elastic Defend"
+  - "FakeCorepack"
+  - "infostealer"
+  - "proxyware"
+
+query: |
+  FROM logs-endpoint.events.* METADATA _id, _index, _version | WHERE @timestamp > NOW() - 7 DAYS AND event.category == "file" AND event.action IN ("create", "modify") AND file.path LIKE "*Startup*" AND process.name IN ("powershell.exe", "pwsh.exe", "cmd.exe", "wscript.exe", "cscript.exe", "node.exe", "mshta.exe", "rundll32.exe", "regsvr32.exe") | KEEP _id, _index, _version, @timestamp, host.name, user.name, process.name, process.executable, file.path, file.name, file.extension, file.hash.sha256 | LIMIT 100
+
+interval: "5m"
+from: "now-10m"
+to: "now"
+
+timestamp_override: "event.ingested"
+timestamp_override_fallback_disabled: false
+
+threat:
+  - framework: "MITRE ATT&CK"
+    tactic:
+      id: "TA0003"
+      name: "Persistence"
+      reference: "https://attack.mitre.org/tactics/TA0003/"
+    technique:
+      - id: "T1547.001"
+        name: "Registry Run Keys / Startup Folder"
+        reference: "https://attack.mitre.org/techniques/T1547/001/"
+        subtechnique: []
+
+note: |
+  ### What triggered this alert
+  This alert was triggered by the creation or modification of a file in a Startup folder or Run key location by a suspicious process (such as powershell.exe, cmd.exe, node.exe, mshta.exe, rundll32.exe, regsvr32.exe, or scripting engines). Attackers commonly use these processes to establish persistence by ensuring their payloads execute automatically when a user logs in or the system starts. This technique is frequently observed in infostealer and proxyware campaigns, including those distributed via fake Corepack installers.
+  
+  ### Possible investigation steps
+  - Review the process.name and process.executable fields to determine which binary created or modified the file.
+  - Examine file.path and file.name to confirm the file's location and assess if it matches known benign startup items.
+  - Check file.hash.sha256 against threat intelligence or allowlists to identify known malware or legitimate software.
+  - Investigate user.name and host.name to determine the affected user and endpoint.
+  - Look for additional suspicious activity from the same process or user, such as network connections or further file modifications.
+  - Review recent downloads or installations on the host that may have led to this persistence attempt.
+  
+  ### False positive analysis
+  - Legitimate software installers or IT management tools may create or update startup items using these processes, especially during updates or scripted deployments.
+  - Some enterprise environments may use custom scripts for user or system startup tasks.
+  
+  ### Response and remediation
+  - Contain the affected endpoint to prevent further execution of potentially malicious startup items.
+  - Collect forensic artifacts: process tree, file hashes, and recent process/file activity.
+  - Remove unauthorized or suspicious files from startup locations.
+  - Reset credentials for affected users if compromise is suspected.
+  - Review and update endpoint protection and allowlists to prevent recurrence.
+  
+  ### References
+  - https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware
+  - https://attack.mitre.org/techniques/T1547/001/
+
+false_positives:
+  - "Legitimate software installers or IT management tools creating startup items"
+  - "Custom enterprise scripts for user or system startup tasks"
+
+references:
+  - "https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware"
+  - "https://attack.mitre.org/techniques/T1547/001/"
+
+max_signals: 100
+actions: []
