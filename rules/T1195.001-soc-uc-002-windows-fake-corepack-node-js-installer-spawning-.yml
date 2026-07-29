@@ -1,0 +1,118 @@
+schema_version: 1
+
+metadata:
+  creation_date: "2026/07/29"
+  updated_date:  "2026/07/29"
+  maturity: "production"
+  author:
+    - "DAC Agent (n8n)"
+
+rule_id: "59cb9f40-fbba-47df-ae0b-6c9b2026021b"
+
+name: "SOC-UC-002-Windows-Fake Corepack/Node.js Installer Spawning PowerShell/CMD with Download Cradle"
+
+description: |
+  Detects suspicious execution of PowerShell or CMD processes spawned by Node.js installer or corepack binaries, exhibiting download cradle or encoded payload patterns. This behavior is associated with infostealer and proxyware campaigns distributed via fake Corepack sites, where attackers leverage compromised software supply chains to gain initial access or execute malicious payloads. Applies to Windows endpoints with Elastic Defend process telemetry.
+
+author:
+  - "DAC Agent (n8n)"
+
+enabled: true
+type: esql
+language: esql
+
+severity: "high"
+risk_score: 73
+
+tags:
+  - "Domain: Endpoint"
+  - "OS: Windows"
+  - "Use Case: Threat Detection"
+  - "Tactic: Initial Access"
+  - "Tactic: Execution"
+  - "T1195.001"
+  - "T1204.002"
+  - "T1059.001"
+  - "T1059.003"
+  - "Data Source: Elastic Defend"
+  - "FakeCorepack"
+  - "infostealer"
+  - "proxyware"
+
+query: |
+  FROM logs-endpoint.events.* METADATA _id, _index, _version | WHERE @timestamp > NOW() - 7 DAYS AND event.category == "process" AND event.action == "exec" AND process.name IN ("powershell.exe", "pwsh.exe", "cmd.exe") AND process.parent.name IN ("node.exe", "npm", "npm.cmd", "npx", "npx.cmd", "corepack", "corepack.cmd", "msiexec.exe") AND ( process.command_line LIKE "*-enc*" OR process.command_line LIKE "*EncodedCommand*" OR process.command_line LIKE "*FromBase64String*" OR process.command_line LIKE "*WebClient*" OR process.command_line LIKE "*DownloadString*" OR process.command_line LIKE "*DownloadFile*" OR process.command_line LIKE "*Invoke-Expression*" OR process.command_line LIKE "*IEX*" OR process.command_line LIKE "*Start-BitsTransfer*" OR process.command_line LIKE "*curl*http*" OR process.command_line LIKE "*wget*http*" OR process.command_line LIKE "*-nop*-w*hidden*" OR process.command_line LIKE "*-WindowStyle*Hidden*" ) | KEEP _id, _index, _version, @timestamp, host.name, user.name, process.name, process.command_line, process.parent.name, process.executable, process.working_directory, process.code_signature.status | LIMIT 100
+
+interval: "5m"
+from: "now-10m"
+to: "now"
+
+timestamp_override: "event.ingested"
+timestamp_override_fallback_disabled: false
+
+threat:
+  - framework: "MITRE ATT&CK"
+    tactic:
+      id: "TA0001"
+      name: "Initial Access"
+      reference: "https://attack.mitre.org/tactics/TA0001/"
+    technique:
+      - id: "T1195.001"
+        name: "Compromise Software Dependencies and Development Tools"
+        reference: "https://attack.mitre.org/techniques/T1195/001/"
+        subtechnique: []
+      - id: "T1204.002"
+        name: "Malicious File"
+        reference: "https://attack.mitre.org/techniques/T1204/002/"
+        subtechnique: []
+      - id: "T1059.001"
+        name: "PowerShell"
+        reference: "https://attack.mitre.org/techniques/T1059/001/"
+        subtechnique: []
+      - id: "T1059.003"
+        name: "Windows Command Shell"
+        reference: "https://attack.mitre.org/techniques/T1059/003/"
+        subtechnique: []
+
+note: |
+  ### What triggered this alert
+  This alert was triggered by the execution of PowerShell or CMD (cmd.exe, powershell.exe, pwsh.exe) processes, spawned by Node.js installer or corepack-related binaries (such as node.exe, npm, npx, corepack, msiexec.exe), where the command line contains indicators of download cradles (e.g., DownloadString, WebClient, curl, wget) or encoded/obfuscated payloads (e.g., -enc, EncodedCommand, FromBase64String). This pattern is strongly associated with recent infostealer and proxyware campaigns distributed via fake Corepack websites, where attackers use malicious installers to gain initial access or execute payloads on Windows endpoints.
+  
+  ### Possible investigation steps
+  - Review the parent process (process.parent.name) and its command line to confirm if it is a legitimate Node.js or installer operation.
+  - Examine the full command line (process.command_line) for signs of obfuscation, download cradle usage, or suspicious URLs.
+  - Check the code signature status (process.code_signature.status) of both the parent and child processes to determine if unsigned or invalid binaries were involved.
+  - Identify the user context (user.name) and host (host.name) to assess the scope and potential impact.
+  - Pivot to related process activity on the same host and user to identify follow-on actions or lateral movement.
+  - Review recent downloads, file writes, or network connections from the affected host for additional indicators of compromise.
+  
+  ### False positive analysis
+  - Legitimate Node.js or npm-based installers that use PowerShell or CMD for benign post-install scripts may trigger this alert, especially in development environments.
+  - Automated build pipelines or software update mechanisms that leverage scripting for legitimate downloads or configuration may also match.
+  
+  ### Response and remediation
+  - Contain the affected endpoint to prevent further execution or data exfiltration.
+  - Collect forensic artifacts: process tree, command lines, downloaded files, and network logs.
+  - Eradicate by removing any unauthorized or malicious installers, scripts, or payloads.
+  - Reset credentials for any accounts used in the suspicious session.
+  - Review and update software supply chain controls to prevent future abuse.
+  
+  ### References
+  - https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware
+  - https://attack.mitre.org/techniques/T1195/001/
+  - https://attack.mitre.org/techniques/T1204/002/
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://attack.mitre.org/techniques/T1059/003/
+
+false_positives:
+  - "Legitimate Node.js or npm-based installers that use PowerShell or CMD for benign post-install scripts"
+  - "Automated build pipelines or software update mechanisms leveraging scripting for downloads"
+
+references:
+  - "https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware"
+  - "https://attack.mitre.org/techniques/T1195/001/"
+  - "https://attack.mitre.org/techniques/T1204/002/"
+  - "https://attack.mitre.org/techniques/T1059/001/"
+  - "https://attack.mitre.org/techniques/T1059/003/"
+
+max_signals: 100
+actions: []
