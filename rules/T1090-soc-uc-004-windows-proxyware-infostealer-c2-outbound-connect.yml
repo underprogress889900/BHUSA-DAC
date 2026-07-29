@@ -1,0 +1,112 @@
+schema_version: 1
+
+metadata:
+  creation_date: "2026/07/29"
+  updated_date:  "2026/07/29"
+  maturity: "production"
+  author:
+    - "DAC Agent (n8n)"
+
+rule_id: "26abf23b-7c01-46d5-9215-1a2ddeaed658"
+
+name: "SOC-UC-004-Windows-Proxyware/Infostealer C2 Outbound Connection from Suspicious Process"
+
+description: |
+  Detects suspicious outbound command-and-control or proxy connections from processes commonly abused in infostealer and proxyware campaigns, including those distributed via fake Corepack sites. Flags unusual port and process combinations that are indicative of C2 or proxyware activity. Applies to Windows endpoints with Elastic Defend network telemetry.
+
+author:
+  - "DAC Agent (n8n)"
+
+enabled: true
+type: esql
+language: esql
+
+severity: "medium"
+risk_score: 47
+
+tags:
+  - "Domain: Endpoint"
+  - "OS: Windows"
+  - "Use Case: Threat Detection"
+  - "Tactic: Command and Control"
+  - "Tactic: Collection"
+  - "Tactic: Discovery"
+  - "T1090"
+  - "T1005"
+  - "T1083"
+  - "Data Source: Elastic Defend"
+  - "FakeCorepack"
+  - "infostealer"
+  - "proxyware"
+
+query: |
+  FROM logs-endpoint.events.* METADATA _id, _index, _version | WHERE @timestamp > NOW() - 7 DAYS AND event.category == "network" AND network.direction == "outbound" AND process.name IN ("node.exe", "powershell.exe", "wscript.exe", "cscript.exe", "mshta.exe", "rundll32.exe") AND destination.port IN (8080, 8443, 9000, 3128, 1080, 4444, 5555, 1337, 6666, 7777) | KEEP _id, _index, _version, @timestamp, host.name, user.name, process.name, destination.ip, destination.domain, destination.port, network.protocol, network.transport | LIMIT 100
+
+interval: "15m"
+from: "now-20m"
+to: "now"
+
+timestamp_override: "event.ingested"
+timestamp_override_fallback_disabled: false
+
+threat:
+  - framework: "MITRE ATT&CK"
+    tactic:
+      id: "TA0011"
+      name: "Command and Control"
+      reference: "https://attack.mitre.org/tactics/TA0011/"
+    technique:
+      - id: "T1090"
+        name: "Proxy"
+        reference: "https://attack.mitre.org/techniques/T1090/"
+        subtechnique: []
+      - id: "T1005"
+        name: "Data from Local System"
+        reference: "https://attack.mitre.org/techniques/T1005/"
+        subtechnique: []
+      - id: "T1083"
+        name: "File and Directory Discovery"
+        reference: "https://attack.mitre.org/techniques/T1083/"
+        subtechnique: []
+
+note: |
+  ### What triggered this alert
+  This alert was triggered by an outbound network connection from a suspicious process (such as node.exe, powershell.exe, wscript.exe, cscript.exe, mshta.exe, or rundll32.exe) to a non-standard or high-risk port (e.g., 8080, 8443, 9000, 3128, 1080, 4444, 5555, 1337, 6666, 7777). These process and port combinations are frequently used by infostealer and proxyware malware for command-and-control (C2) or proxy operations, as seen in campaigns like Fake Corepack.
+  
+  ### Possible investigation steps
+  - Review the process.name and user.name fields to identify which user and process initiated the connection.
+  - Examine destination.ip, destination.domain, and destination.port for known malicious infrastructure or unusual destinations.
+  - Check network.protocol and network.transport to determine if the connection is using an unexpected protocol (e.g., HTTP/S over a non-standard port).
+  - Investigate host.name for additional suspicious activity or related alerts on the same endpoint.
+  - Pivot to process ancestry and command line to determine if the process was launched by another suspicious binary or script.
+  - Cross-reference destination IP/domain with threat intelligence feeds.
+  
+  ### False positive analysis
+  - Some legitimate applications (e.g., development tools, local proxies, or IT management utilities) may use these ports for benign outbound connections.
+  - Internal testing or software updates may also trigger this alert if they use non-standard ports.
+  
+  ### Response and remediation
+  - Contain the affected endpoint to prevent further C2 or data exfiltration.
+  - Collect network logs, process trees, and memory dumps for forensic analysis.
+  - Block suspicious destination IPs or domains at the network perimeter.
+  - Remove or quarantine any unauthorized or malicious binaries identified.
+  - Review and update firewall rules and endpoint protection policies.
+  
+  ### References
+  - https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware
+  - https://attack.mitre.org/techniques/T1090/
+  - https://attack.mitre.org/techniques/T1005/
+  - https://attack.mitre.org/techniques/T1083/
+
+false_positives:
+  - "Legitimate development tools or IT management utilities using non-standard ports"
+  - "Internal testing or software updates communicating over high ports"
+
+references:
+  - "https://socket.dev/blog/fake-corepack-site-distributes-infostealer-and-proxyware"
+  - "https://attack.mitre.org/techniques/T1090/"
+  - "https://attack.mitre.org/techniques/T1005/"
+  - "https://attack.mitre.org/techniques/T1083/"
+
+max_signals: 100
+actions: []
